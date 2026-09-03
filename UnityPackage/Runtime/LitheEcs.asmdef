@@ -1,0 +1,8 @@
+{
+  "name": "LitheEcs",
+  "rootNamespace": "LitheEcs",
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "autoReferenced": true,
+  "noEngineReferences": true
+}

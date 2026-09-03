@@ -1,0 +1,20 @@
+{
+  "name": "com.github.kurobon.litheecs",
+  "version": "0.1.0",
+  "displayName": "LitheEcs",
+  "description": "A small, fast, managed C# Entity Component System for Unity.",
+  "unity": "2022.3",
+  "dependencies": {
+    "com.unity.burst": "1.8.7",
+    "com.unity.collections": "2.1.4"
+  },
+  "author": {
+    "name": "kurobon",
+    "url": "https://github.com/kurobon-jp/LitheEcs"
+  },
+  "keywords": [
+    "ecs",
+    "entity-component-system",
+    "performance"
+  ]
+}

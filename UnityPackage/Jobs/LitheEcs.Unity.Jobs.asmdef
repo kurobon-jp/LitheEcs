@@ -1,0 +1,13 @@
+{
+  "name": "LitheEcs.Unity.Jobs",
+  "rootNamespace": "LitheEcs.Unity.Jobs",
+  "references": [
+    "LitheEcs",
+    "Unity.Burst",
+    "Unity.Collections"
+  ],
+  "allowUnsafeCode": true,
+  "overrideReferences": false,
+  "autoReferenced": true,
+  "noEngineReferences": false
+}

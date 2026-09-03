@@ -1,0 +1,66 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>netstandard2.1</TargetFramework>
+        <LangVersion>9.0</LangVersion>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>LitheEcs</RootNamespace>
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <CompilerGeneratedFilesOutputPath>$(BaseIntermediateOutputPath)generated</CompilerGeneratedFilesOutputPath>
+        <SyncUnityPackage Condition="'$(SyncUnityPackage)' == ''">true</SyncUnityPackage>
+        <LitheEcsUnityPackageDirectory Condition="'$(LitheEcsUnityPackageDirectory)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../UnityPackage/Runtime'))</LitheEcsUnityPackageDirectory>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+        <DefineConstants>$(DefineConstants);RELEASE</DefineConstants>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\LitheEcs.SourceGenerator\LitheEcs.SourceGenerator.csproj"
+                        OutputItemType="Analyzer"
+                        ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <UnityPackageSyncSource Include="$(MSBuildProjectDirectory)/LitheEcs.cs" TargetName="LitheEcs.cs" />
+        <UnityPackageSyncSource Include="$(MSBuildProjectDirectory)/ArchetypeStorage.cs" TargetName="ArchetypeStorage.cs" />
+        <UnityPackageSyncSource Include="$(BaseIntermediateOutputPath)generated/LitheEcs.SourceGenerator/LitheEcs.SourceGenerator.QueryGenerator/GeneratedQueries.g.cs" TargetName="GeneratedQueries.g.cs" />
+        <UnityPackageSyncSource Include="$(MSBuildProjectDirectory)/API.md" TargetName="API.md" />
+    </ItemGroup>
+
+    <Target Name="SyncLitheEcsUnityPackage"
+            AfterTargets="Build"
+            Condition="'$(SyncUnityPackage)' == 'true'">
+        <Error Condition="!Exists('%(UnityPackageSyncSource.FullPath)')"
+               Text="Required Unity package source was not produced: %(UnityPackageSyncSource.FullPath)" />
+        <Copy SourceFiles="@(UnityPackageSyncSource)"
+              DestinationFiles="@(UnityPackageSyncSource->'$(LitheEcsUnityPackageDirectory)/%(TargetName)')"
+              SkipUnchangedFiles="true" />
+        <Message Importance="High"
+                 Text="Synchronized runtime sources and documentation to: $(LitheEcsUnityPackageDirectory)" />
+    </Target>
+
+    <Target Name="CheckLitheEcsUnityPackage">
+        <Error Condition="!Exists('%(UnityPackageSyncSource.FullPath)')"
+               Text="Required Unity package source was not produced: %(UnityPackageSyncSource.FullPath)" />
+        <GetFileHash Files="@(UnityPackageSyncSource)" Algorithm="SHA256">
+            <Output TaskParameter="Items" ItemName="UnityPackageSyncSourceHash" />
+        </GetFileHash>
+        <ItemGroup>
+            <UnityPackageSyncTarget Include="@(UnityPackageSyncSourceHash->'$(LitheEcsUnityPackageDirectory)/%(TargetName)')">
+                <SourceHash>%(FileHash)</SourceHash>
+            </UnityPackageSyncTarget>
+        </ItemGroup>
+        <Error Condition="!Exists('%(UnityPackageSyncTarget.FullPath)')"
+               Text="Missing: %(UnityPackageSyncTarget.FullPath)" />
+        <GetFileHash Files="@(UnityPackageSyncTarget)" Algorithm="SHA256">
+            <Output TaskParameter="Items" ItemName="UnityPackageSyncTargetHash" />
+        </GetFileHash>
+        <Error Condition="'%(UnityPackageSyncTargetHash.SourceHash)' != '%(UnityPackageSyncTargetHash.FileHash)'"
+               Text="Out of date: %(UnityPackageSyncTargetHash.FullPath)" />
+        <Message Importance="High"
+                 Text="Unity package is synchronized: $(LitheEcsUnityPackageDirectory)" />
+    </Target>
+
+</Project>

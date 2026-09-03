@@ -1,0 +1,21 @@
+# 1. すべてのファイルを一旦除外
+*
+
+# 2. すべての「ディレクトリ」は検索対象として許可（最重要！）
+!*/
+
+# 3. バージョン管理に含めたいファイルを指定
+!/.gitignore
+!/README.*
+!/LICENSE
+!/LitheEcs.sln
+!LitheEcs/**
+!LitheEcs.SourceGenerator/**
+!LitheEcsBenchmark/**
+!LitheEcsTest/**
+!UnityPackage/**
+!scripts/**
+!media/**
+
+bin
+obj
