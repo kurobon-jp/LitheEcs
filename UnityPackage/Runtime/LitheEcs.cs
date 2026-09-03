@@ -5029,10 +5029,6 @@ namespace LitheEcs
             if (typeId < _componentVersions.Length) return;
             var capacity = Math.Max(typeId + 1, _componentVersions.Length * 2);
             Array.Resize(ref _componentVersions, capacity);
-#if _INTERNAL_DERIVED_USE_DIAGNOSTICS
-            Array.Resize(ref _componentEntityCounts, capacity);
-            Array.Resize(ref _peakComponentEntityCounts, capacity);
-#endif
             if (_singletonEntities != null) Array.Resize(ref _singletonEntities, capacity);
             if (_incrementalQueryPlans != null) Array.Resize(ref _incrementalQueryPlans, capacity);
         }
