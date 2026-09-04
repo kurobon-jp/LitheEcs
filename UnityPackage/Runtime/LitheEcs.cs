@@ -1148,16 +1148,6 @@ namespace LitheEcs
         void Execute(in Entity entity, ref T1 c1, ref T2 c2);
     }
 
-    public interface IComponentAction<T1> where T1 : struct
-    {
-        void Execute(ref T1 c1);
-    }
-
-    public interface IComponentAction<T1, T2> where T1 : struct where T2 : struct
-    {
-        void Execute(ref T1 c1, ref T2 c2);
-    }
-
     public interface IQueryAction<T1, T2, T3> where T1 : struct where T2 : struct where T3 : struct
     {
         void Execute(in Entity entity, ref T1 c1, ref T2 c2, ref T3 c3);
@@ -5029,6 +5019,10 @@ namespace LitheEcs
             if (typeId < _componentVersions.Length) return;
             var capacity = Math.Max(typeId + 1, _componentVersions.Length * 2);
             Array.Resize(ref _componentVersions, capacity);
+#if _INTERNAL_DERIVED_USE_DIAGNOSTICS
+            Array.Resize(ref _componentEntityCounts, capacity);
+            Array.Resize(ref _peakComponentEntityCounts, capacity);
+#endif
             if (_singletonEntities != null) Array.Resize(ref _singletonEntities, capacity);
             if (_incrementalQueryPlans != null) Array.Resize(ref _incrementalQueryPlans, capacity);
         }
@@ -5906,23 +5900,6 @@ namespace LitheEcs
             if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
             job.EnsureItemCapacity(World.GetParallelRangeReservationCount(
                 maximumEntityCount, _plan.Matches.Count, batchSize));
-        }
-
-        [Obsolete("Use ForEach(ref action) instead. Omitting Entity access does not justify a separate iteration API.")]
-        public void ForEachComponents<TAction>(ref TAction action) where TAction : struct, IComponentAction<T1>
-        {
-            _plan.Ensure();
-            var matches = _plan.Matches;
-            for (var a = 0; a < matches.Count; a++)
-            {
-                var archetype = matches[a];
-                for (var c = 0; c < archetype.Chunks.Count; c++)
-                {
-                    var chunk = archetype.Chunks[c];
-                    var components = archetype.GetColumn<T1>(chunk);
-                    for (var i = 0; i < chunk.Count; i++) action.Execute(ref components[i]);
-                }
-            }
         }
 
         internal void ParallelForRanges(ParallelRangeAction<T1> action, int minimumEntityCount, int batchSize)

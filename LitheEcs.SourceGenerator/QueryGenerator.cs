@@ -37,7 +37,6 @@ public sealed class QueryGenerator : ISourceGenerator
                 AppendParallelRangeDelegate(source, arity);
                 AppendActionInterface(source, arity);
             }
-            if (arity >= 3) AppendComponentActionInterface(source, arity);
             AppendArchetypeQuery(source, arity);
             AppendParallelQuery(source, arity);
         }
@@ -110,16 +109,6 @@ public sealed class QueryGenerator : ISourceGenerator
         source.AppendLine("    }");
     }
 
-    private static void AppendComponentActionInterface(StringBuilder source, int arity)
-    {
-        source.Append("    public interface IComponentAction<").Append(TypeParameters(arity)).Append('>').Append(Constraints(arity)).AppendLine();
-        source.AppendLine("    {");
-        source.Append("        void Execute(");
-        for (int i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("ref T").Append(i).Append(" c").Append(i);
-        source.AppendLine(");");
-        source.AppendLine("    }");
-    }
-
     private static void AppendWorldFactory(StringBuilder source, int arity)
     {
         var types = TypeParameters(arity);
@@ -156,7 +145,6 @@ public sealed class QueryGenerator : ISourceGenerator
 
         AppendArchetypeForEach(source, arity, types, false);
         AppendArchetypeForEach(source, arity, types, true);
-        AppendArchetypeComponentForEach(source, arity, types);
         if (arity <= 3) AppendArchetypeJobRangeLease(source, arity, types);
         AppendArchetypeParallelRangeReservation(source, arity, types);
         AppendArchetypeParallelRanges(source, arity, types);
@@ -204,21 +192,6 @@ public sealed class QueryGenerator : ISourceGenerator
         for (var i = 1; i <= arity; i++) source.Append(", ref d").Append(i).Append("[n]");
         source.AppendLine(");");
         source.AppendLine("                } } }");
-        source.AppendLine("        }");
-    }
-
-    private static void AppendArchetypeComponentForEach(StringBuilder source, int arity, string types)
-    {
-        source.AppendLine("        [Obsolete(\"Use ForEach(ref action) instead. Omitting Entity access does not justify a separate action interface and iteration API.\")]");
-        source.Append("        public void ForEachComponents<TAction>(ref TAction action) where TAction : struct, IComponentAction<").Append(types).AppendLine(">");
-        source.AppendLine("        { _plan.Ensure(); var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;");
-        for (var i = 1; i <= arity; i++)
-            source.Append("            var d").Append(i).Append(" = archetype.GetColumn<T").Append(i).AppendLine(">(chunk);");
-        source.AppendLine("            for (var n = 0; n < count; n++) {");
-        source.Append("                action.Execute(");
-        for (var i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("ref d").Append(i).Append("[n]");
-        source.AppendLine(");");
-        source.AppendLine("            } } }");
         source.AppendLine("        }");
     }
 
@@ -285,33 +258,6 @@ public sealed class QueryGenerator : ISourceGenerator
         source.Append("          chunk = new AlignedChunk(");
         for (var i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("found!.GetColumn<T").Append(i).Append(">(foundChunk)");
         source.AppendLine(", foundChunk.Count); return true; }");
-        source.AppendLine("        [Obsolete(\"Use TryGetAlignedChunk(out chunk) instead.\")] public AlignedEnumerable Aligned() => new AlignedEnumerable(this);");
-        source.AppendLine("        public readonly ref struct AlignedEnumerable { private readonly Query<" + types + "> _query; internal AlignedEnumerable(Query<" + types + "> query) => _query = query; public AlignedEnumerator GetEnumerator() { if (!_query._allowAligned) throw new InvalidOperationException(\"Query is filtered.\"); return new AlignedEnumerator(_query._world, _query._plan); } }");
-        source.AppendLine("        public ref struct AlignedEnumerator {");
-        source.AppendLine("          private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;");
-        for (var i = 1; i <= arity; i++) source.Append("          private T").Append(i).Append("[]? _d").Append(i).AppendLine(";");
-        source.Append("          internal AlignedEnumerator(World world, ArchetypeQueryPlan plan) { plan.Ensure(); _world = world; _version = world.StructuralVersion; _plan = plan; _a = 0; _c = 0; _row = -1; _count = 0;");
-        for (var i = 1; i <= arity; i++) source.Append(" _d").Append(i).Append(" = null;");
-        source.AppendLine(" }");
-        source.AppendLine("          public bool MoveNext() { if (++_row < _count) return true; var matches = _plan.Matches; while (_a < matches.Count) { var archetype = matches[_a]; if (_c >= archetype.Chunks.Count) { _a++; _c = 0; continue; } var chunk = archetype.Chunks[_c++]; _count = chunk.Count; if (_count == 0) continue; _world.ValidateQueryStructuralVersion(_version);");
-        for (var i = 1; i <= arity; i++) source.Append(" _d").Append(i).Append(" = archetype.GetColumn<T").Append(i).Append(">(chunk);");
-        source.AppendLine(" _row = 0; return true; } return false; }");
-        source.Append("          public AlignedRefTuple Current => new AlignedRefTuple(");
-        for (var i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("_d").Append(i).Append("!");
-        source.AppendLine(", _row); }");
-        source.AppendLine("        public readonly ref struct AlignedRefTuple {");
-        for (var i = 1; i <= arity; i++) source.Append("          private readonly T").Append(i).Append("[] _d").Append(i).AppendLine(";");
-        source.AppendLine("          private readonly int _index;");
-        source.Append("          internal AlignedRefTuple(");
-        for (var i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("T").Append(i).Append("[] d").Append(i);
-        source.AppendLine(", int index) {");
-        for (var i = 1; i <= arity; i++) source.Append(" _d").Append(i).Append(" = d").Append(i).Append(";");
-        source.AppendLine(" _index = index; }");
-        source.Append("          public void Deconstruct(");
-        for (var i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("out Query<T1, T2>.RefItem<T").Append(i).Append("> c").Append(i);
-        source.AppendLine(") {");
-        for (var i = 1; i <= arity; i++) source.Append(" c").Append(i).Append(" = new Query<T1, T2>.RefItem<T").Append(i).Append(">(_d").Append(i).Append(", _index);");
-        source.AppendLine(" } }");
         source.AppendLine("        public readonly ref struct AlignedChunk {");
         for (var i = 1; i <= arity; i++) source.Append("          public readonly Span<T").Append(i).Append("> Component").Append(i).Append("; internal readonly T").Append(i).Append("[] Array").Append(i).AppendLine(";");
         source.AppendLine("          private readonly int _length;");
@@ -348,7 +294,6 @@ public sealed class QueryGenerator : ISourceGenerator
 
         AppendPlannedForEach(source, arity, types, false);
         AppendPlannedForEach(source, arity, types, true);
-        AppendComponentForEach(source, arity, types);
 
         source.AppendLine("        public bool TryGetAlignedChunk(out AlignedChunk chunk)");
         source.AppendLine("        { _plan.Ensure(); if (!_excludedMask.IsEmpty || !_anyMask.IsEmpty || !_allMask.SameAs(_plan.ProjectedMask) || !_plan.IsAligned) { chunk = default; return false; }");
@@ -356,8 +301,6 @@ public sealed class QueryGenerator : ISourceGenerator
         source.Append("          chunk = new AlignedChunk(");
         for (var i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("_plan.S").Append(i).Append("!.DenseArray.AsSpan(0, _plan.Count)");
         source.AppendLine("); return true; }");
-        source.AppendLine("        [Obsolete(\"Use TryGetAlignedChunk(out chunk) instead. Aligned() throws when component storage order is not aligned, while TryGetAlignedChunk reports that condition safely.\")]");
-        source.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)] public AlignedEnumerable Aligned() => new AlignedEnumerable(this);");
 
         source.AppendLine("        public ref struct Enumerator");
         source.AppendLine("        {");
@@ -400,7 +343,6 @@ public sealed class QueryGenerator : ISourceGenerator
         source.AppendLine("            }");
         source.AppendLine("        }");
 
-        AppendAlignedEnumerable(source, arity, types);
 
         source.AppendLine("        public readonly ref struct AlignedChunk");
         source.AppendLine("        {");
@@ -424,62 +366,6 @@ public sealed class QueryGenerator : ISourceGenerator
         source.AppendLine("            internal RefItem(T[] dense, int denseIndex) { _dense = dense; _index = denseIndex; }");
         source.AppendLine("            public ref T Value { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => ref _dense[_index]; }");
         source.AppendLine("            public static implicit operator T(RefItem<T> item) => item._dense[item._index];");
-        source.AppendLine("        }");
-    }
-
-    private static void AppendComponentForEach(StringBuilder source, int arity, string types)
-    {
-        source.AppendLine("        [Obsolete(\"Use ForEach(ref action) instead. Omitting Entity access does not justify a separate action interface and iteration API.\")]");
-        source.Append("        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void ForEachComponents<TAction>(ref TAction action) where TAction : struct, IComponentAction<")
-            .Append(types).AppendLine(">");
-        source.AppendLine("        {");
-        source.AppendLine("            _plan.Ensure(); var plan = _plan; var filtered = !_excludedMask.IsEmpty || !_anyMask.IsEmpty || !_allMask.SameAs(plan.ProjectedMask);");
-        source.AppendLine("            if (plan.Count == 0) return;");
-        for (var i = 1; i <= arity; i++) source.Append("            var d").Append(i).Append(" = plan.S").Append(i).AppendLine("!.DenseArray;");
-        source.AppendLine("            if (plan.IsAligned && !filtered) { for (var n = 0; n < plan.Count; n++) {");
-        source.Append("                action.Execute(");
-        for (var i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("ref d").Append(i).Append("[n]");
-        source.AppendLine("); } return; }");
-        source.AppendLine("            for (var n = 0; n < plan.Count; n++) { var entityIndex = plan.Entities[n]; if (filtered) { var mask = _world.GetMask(entityIndex); if (!mask.ContainsAll(_allMask) || !mask.ContainsNone(_excludedMask) || (!_anyMask.IsEmpty && !mask.Intersects(_anyMask))) continue; } var indices = plan.Indices[n];");
-        source.Append("                action.Execute(");
-        for (var i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("ref d").Append(i).Append("[indices.I").Append(i).Append("]");
-        source.AppendLine("); } }");
-    }
-
-    private static void AppendAlignedEnumerable(StringBuilder source, int arity, string types)
-    {
-        source.AppendLine("        public readonly ref struct AlignedEnumerable");
-        source.AppendLine("        {");
-        source.Append("            private readonly Query<").Append(types).AppendLine("> _query;");
-        source.Append("            internal AlignedEnumerable(Query<").Append(types).AppendLine("> query) => _query = query;");
-        source.AppendLine("            public AlignedEnumerator GetEnumerator() { if (!_query.TryGetAlignedChunk(out _)) throw new InvalidOperationException(\"Query is filtered or component storage is not aligned.\"); return new AlignedEnumerator(_query._plan); }");
-        source.AppendLine("        }");
-        source.AppendLine("        public ref struct AlignedEnumerator");
-        source.AppendLine("        {");
-        for (var i = 1; i <= arity; i++) source.Append("            private readonly T").Append(i).Append("[] _d").Append(i).AppendLine(";");
-        source.AppendLine("            private readonly int _count; private int _index;");
-        source.AppendLine("            internal AlignedEnumerator(Plan plan) {");
-        for (var i = 1; i <= arity; i++) source.Append("                _d").Append(i).Append(" = plan.S").Append(i).Append("?.DenseArray ?? Array.Empty<T").Append(i).AppendLine(">();");
-        source.AppendLine("                _count = plan.Count; _index = -1; }");
-        source.AppendLine("            [MethodImpl(MethodImplOptions.AggressiveInlining)] public bool MoveNext() => ++_index < _count;");
-        source.Append("            public AlignedRefTuple Current { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => new AlignedRefTuple(");
-        for (var i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("_d").Append(i);
-        source.AppendLine(", _index); }");
-        source.AppendLine("        }");
-        source.AppendLine("        public readonly ref struct AlignedRefTuple");
-        source.AppendLine("        {");
-        for (var i = 1; i <= arity; i++) source.Append("            private readonly T").Append(i).Append("[] _d").Append(i).AppendLine(";");
-        source.AppendLine("            private readonly int _index;");
-        source.Append("            internal AlignedRefTuple(");
-        for (var i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("T").Append(i).Append("[] d").Append(i);
-        source.AppendLine(", int index) {");
-        for (var i = 1; i <= arity; i++) source.Append("                _d").Append(i).Append(" = d").Append(i).AppendLine(";");
-        source.AppendLine("                _index = index; }");
-        source.Append("            [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Deconstruct(");
-        for (var i = 1; i <= arity; i++) source.Append(i == 1 ? "" : ", ").Append("out Query<T1, T2>.RefItem<T").Append(i).Append("> c").Append(i);
-        source.AppendLine(") {");
-        for (var i = 1; i <= arity; i++) source.Append("                c").Append(i).Append(" = new Query<T1, T2>.RefItem<T").Append(i).Append(">(_d").Append(i).AppendLine(", _index);");
-        source.AppendLine("            }");
         source.AppendLine("        }");
     }
 

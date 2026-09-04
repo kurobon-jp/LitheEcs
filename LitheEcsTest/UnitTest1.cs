@@ -1770,18 +1770,15 @@ namespace LitheEcs.Tests
             foreach (var _ in query) enumeratedCount++;
 
             Assert.That(query.TryGetAlignedChunk(out var chunk), Is.True);
-            var alignedCount = 0;
-            foreach (var _ in query.Aligned()) alignedCount++;
 
             var componentAction = new HealthComponentAction();
             Assert.DoesNotThrow(() => _world.Query<Position, Velocity, Acceleration, Health, Player>()
-                .ForEachComponents(ref componentAction));
+                .ForEach(ref componentAction));
 
             Assert.That(delegateCount, Is.Zero);
             Assert.That(action.Count, Is.Zero);
             Assert.That(enumeratedCount, Is.Zero);
             Assert.That(chunk.Length, Is.Zero);
-            Assert.That(alignedCount, Is.Zero);
         }
 
         [Test]
@@ -1801,38 +1798,34 @@ namespace LitheEcs.Tests
         }
 
         [Test]
-        public void GeneratedQuery_AlignedEnumeratorAndComponentAction_ShouldMutateComponents()
+        public void GeneratedQuery_AlignedChunkAndQueryAction_ShouldMutateComponents()
         {
             var entity = SpawnMovingEntity();
             entity.Add(new Acceleration()); entity.Add(new Health()); entity.Add(new Player());
 
-            foreach (var (position, velocity, acceleration) in _world.Query<Position, Velocity, Acceleration>().Aligned())
-                position.Value.Value += velocity.Value.Value + acceleration.Value.Value;
+            Assert.That(_world.Query<Position, Velocity, Acceleration>().TryGetAlignedChunk(out var chunk), Is.True);
+            for (var n = 0; n < chunk.Length; n++)
+                chunk.Component1[n].Value += chunk.Component2[n].Value + chunk.Component3[n].Value;
 
             var action = new HealthComponentAction();
-            _world.Query<Position, Velocity, Acceleration, Health, Player>().ForEachComponents(ref action);
+            _world.Query<Position, Velocity, Acceleration, Health, Player>().ForEach(ref action);
 
             Assert.That(entity.Get<Position>().Value, Is.EqualTo(new Vector3(1, 1, 1)));
             Assert.That(entity.Get<Health>().Value, Is.EqualTo(1));
         }
 
         [Test]
-        public void GeneratedQuery_LegacyAlignedEnumerator_ShouldTraverseMultipleChunks()
+        public void GeneratedQuery_AlignedChunk_ShouldRejectMultipleChunks()
         {
             _world.CreateTemplate().Add(new Position()).Add(new Velocity()).SpawnBatch(300);
 
-            var count = 0;
-            foreach (var _ in _world.Query<Position, Velocity>().Aligned()) count++;
-
-            Assert.That(count, Is.EqualTo(300));
-            // A Span cannot cross fixed-size page boundaries. The regular and legacy
-            // enumerators remain transparent, while the single-span API reports false.
+            // A Span cannot cross fixed-size page boundaries.
             Assert.That(_world.Query<Position, Velocity>().TryGetAlignedChunk(out _), Is.False);
         }
 
-        private struct HealthComponentAction : IComponentAction<Position, Velocity, Acceleration, Health, Player>
+        private struct HealthComponentAction : IQueryAction<Position, Velocity, Acceleration, Health, Player>
         {
-            public void Execute(ref Position position, ref Velocity velocity, ref Acceleration acceleration,
+            public void Execute(in Entity entity, ref Position position, ref Velocity velocity, ref Acceleration acceleration,
                 ref Health health, ref Player player) => health.Value++;
         }
 

@@ -40,15 +40,6 @@ namespace LitheEcs
                     action.Execute(in entity, ref d1[n], ref d2[n]);
                 } } }
         }
-        [Obsolete("Use ForEach(ref action) instead. Omitting Entity access does not justify a separate action interface and iteration API.")]
-        public void ForEachComponents<TAction>(ref TAction action) where TAction : struct, IComponentAction<T1, T2>
-        { _plan.Ensure(); var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-            var d1 = archetype.GetColumn<T1>(chunk);
-            var d2 = archetype.GetColumn<T2>(chunk);
-            for (var n = 0; n < count; n++) {
-                action.Execute(ref d1[n], ref d2[n]);
-            } } }
-        }
         internal JobQueryRangeLease<T1, T2> AcquireJobRanges()
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); _world.EnterParallelQuery(); return new JobQueryRangeLease<T1, T2>(_world, _plan.Matches); }
         internal void GetJobRangeReservationCounts(int maximumEntityCount, int batchSize, out int rangeCount, out int workCount)
@@ -88,24 +79,6 @@ namespace LitheEcs
           public RefTuple Current { get => new RefTuple(_d1!, _row, _d2!, _row); } }
         public bool TryGetAlignedChunk(out AlignedChunk chunk) { if (!_allowAligned) { chunk = default; return false; } _plan.Ensure(); Archetype? found = null; ArchetypeChunk? foundChunk = null; var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var candidate = matches[a]; for (var c = 0; c < candidate.Chunks.Count; c++) { var candidateChunk = candidate.Chunks[c]; if (candidateChunk.Count == 0) continue; if (foundChunk != null) { chunk = default; return false; } found = candidate; foundChunk = candidateChunk; } } if (foundChunk == null) { chunk = default; return true; }
           chunk = new AlignedChunk(found!.GetColumn<T1>(foundChunk), found!.GetColumn<T2>(foundChunk), foundChunk.Count); return true; }
-        [Obsolete("Use TryGetAlignedChunk(out chunk) instead.")] public AlignedEnumerable Aligned() => new AlignedEnumerable(this);
-        public readonly ref struct AlignedEnumerable { private readonly Query<T1, T2> _query; internal AlignedEnumerable(Query<T1, T2> query) => _query = query; public AlignedEnumerator GetEnumerator() { if (!_query._allowAligned) throw new InvalidOperationException("Query is filtered."); return new AlignedEnumerator(_query._world, _query._plan); } }
-        public ref struct AlignedEnumerator {
-          private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
-          private T1[]? _d1;
-          private T2[]? _d2;
-          internal AlignedEnumerator(World world, ArchetypeQueryPlan plan) { plan.Ensure(); _world = world; _version = world.StructuralVersion; _plan = plan; _a = 0; _c = 0; _row = -1; _count = 0; _d1 = null; _d2 = null; }
-          public bool MoveNext() { if (++_row < _count) return true; var matches = _plan.Matches; while (_a < matches.Count) { var archetype = matches[_a]; if (_c >= archetype.Chunks.Count) { _a++; _c = 0; continue; } var chunk = archetype.Chunks[_c++]; _count = chunk.Count; if (_count == 0) continue; _world.ValidateQueryStructuralVersion(_version);
- _d1 = archetype.GetColumn<T1>(chunk); _d2 = archetype.GetColumn<T2>(chunk); _row = 0; return true; } return false; }
-          public AlignedRefTuple Current => new AlignedRefTuple(_d1!, _d2!, _row); }
-        public readonly ref struct AlignedRefTuple {
-          private readonly T1[] _d1;
-          private readonly T2[] _d2;
-          private readonly int _index;
-          internal AlignedRefTuple(T1[] d1, T2[] d2, int index) {
- _d1 = d1; _d2 = d2; _index = index; }
-          public void Deconstruct(out Query<T1, T2>.RefItem<T1> c1, out Query<T1, T2>.RefItem<T2> c2) {
- c1 = new Query<T1, T2>.RefItem<T1>(_d1, _index); c2 = new Query<T1, T2>.RefItem<T2>(_d2, _index); } }
         public readonly ref struct AlignedChunk {
           public readonly Span<T1> Component1; internal readonly T1[] Array1;
           public readonly Span<T2> Component2; internal readonly T2[] Array2;
@@ -140,10 +113,6 @@ namespace LitheEcs
         { if (minimumEntityCount < 1) throw new ArgumentOutOfRangeException(nameof(minimumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _source = source; MinimumEntityCount = minimumEntityCount; BatchSize = batchSize; }
         public void Reserve(int maximumEntityCount) => _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
         public void Run(ParallelRangeAction<T1, T2> action) => _source.ParallelForRanges(action, MinimumEntityCount, BatchSize);
-    }
-    public interface IComponentAction<T1, T2, T3> where T1 : struct where T2 : struct where T3 : struct
-    {
-        void Execute(ref T1 c1, ref T2 c2, ref T3 c3);
     }
     public readonly struct Query<T1, T2, T3> where T1 : struct where T2 : struct where T3 : struct
     {
@@ -182,16 +151,6 @@ namespace LitheEcs
                 var entityIds = chunk.EntityIds; for (var n = 0; n < count; n++) { var entity = world.GetEntity(entityIds[n]);
                     action.Execute(in entity, ref d1[n], ref d2[n], ref d3[n]);
                 } } }
-        }
-        [Obsolete("Use ForEach(ref action) instead. Omitting Entity access does not justify a separate action interface and iteration API.")]
-        public void ForEachComponents<TAction>(ref TAction action) where TAction : struct, IComponentAction<T1, T2, T3>
-        { _plan.Ensure(); var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-            var d1 = archetype.GetColumn<T1>(chunk);
-            var d2 = archetype.GetColumn<T2>(chunk);
-            var d3 = archetype.GetColumn<T3>(chunk);
-            for (var n = 0; n < count; n++) {
-                action.Execute(ref d1[n], ref d2[n], ref d3[n]);
-            } } }
         }
         internal JobQueryRangeLease<T1, T2, T3> AcquireJobRanges()
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); _world.EnterParallelQuery(); return new JobQueryRangeLease<T1, T2, T3>(_world, _plan.Matches); }
@@ -235,26 +194,6 @@ namespace LitheEcs
           public RefTuple Current { get => new RefTuple(_d1!, _row, _d2!, _row, _d3!, _row); } }
         public bool TryGetAlignedChunk(out AlignedChunk chunk) { if (!_allowAligned) { chunk = default; return false; } _plan.Ensure(); Archetype? found = null; ArchetypeChunk? foundChunk = null; var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var candidate = matches[a]; for (var c = 0; c < candidate.Chunks.Count; c++) { var candidateChunk = candidate.Chunks[c]; if (candidateChunk.Count == 0) continue; if (foundChunk != null) { chunk = default; return false; } found = candidate; foundChunk = candidateChunk; } } if (foundChunk == null) { chunk = default; return true; }
           chunk = new AlignedChunk(found!.GetColumn<T1>(foundChunk), found!.GetColumn<T2>(foundChunk), found!.GetColumn<T3>(foundChunk), foundChunk.Count); return true; }
-        [Obsolete("Use TryGetAlignedChunk(out chunk) instead.")] public AlignedEnumerable Aligned() => new AlignedEnumerable(this);
-        public readonly ref struct AlignedEnumerable { private readonly Query<T1, T2, T3> _query; internal AlignedEnumerable(Query<T1, T2, T3> query) => _query = query; public AlignedEnumerator GetEnumerator() { if (!_query._allowAligned) throw new InvalidOperationException("Query is filtered."); return new AlignedEnumerator(_query._world, _query._plan); } }
-        public ref struct AlignedEnumerator {
-          private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
-          private T1[]? _d1;
-          private T2[]? _d2;
-          private T3[]? _d3;
-          internal AlignedEnumerator(World world, ArchetypeQueryPlan plan) { plan.Ensure(); _world = world; _version = world.StructuralVersion; _plan = plan; _a = 0; _c = 0; _row = -1; _count = 0; _d1 = null; _d2 = null; _d3 = null; }
-          public bool MoveNext() { if (++_row < _count) return true; var matches = _plan.Matches; while (_a < matches.Count) { var archetype = matches[_a]; if (_c >= archetype.Chunks.Count) { _a++; _c = 0; continue; } var chunk = archetype.Chunks[_c++]; _count = chunk.Count; if (_count == 0) continue; _world.ValidateQueryStructuralVersion(_version);
- _d1 = archetype.GetColumn<T1>(chunk); _d2 = archetype.GetColumn<T2>(chunk); _d3 = archetype.GetColumn<T3>(chunk); _row = 0; return true; } return false; }
-          public AlignedRefTuple Current => new AlignedRefTuple(_d1!, _d2!, _d3!, _row); }
-        public readonly ref struct AlignedRefTuple {
-          private readonly T1[] _d1;
-          private readonly T2[] _d2;
-          private readonly T3[] _d3;
-          private readonly int _index;
-          internal AlignedRefTuple(T1[] d1, T2[] d2, T3[] d3, int index) {
- _d1 = d1; _d2 = d2; _d3 = d3; _index = index; }
-          public void Deconstruct(out Query<T1, T2>.RefItem<T1> c1, out Query<T1, T2>.RefItem<T2> c2, out Query<T1, T2>.RefItem<T3> c3) {
- c1 = new Query<T1, T2>.RefItem<T1>(_d1, _index); c2 = new Query<T1, T2>.RefItem<T2>(_d2, _index); c3 = new Query<T1, T2>.RefItem<T3>(_d3, _index); } }
         public readonly ref struct AlignedChunk {
           public readonly Span<T1> Component1; internal readonly T1[] Array1;
           public readonly Span<T2> Component2; internal readonly T2[] Array2;
@@ -286,10 +225,6 @@ namespace LitheEcs
         { if (minimumEntityCount < 1) throw new ArgumentOutOfRangeException(nameof(minimumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _source = source; MinimumEntityCount = minimumEntityCount; BatchSize = batchSize; }
         public void Reserve(int maximumEntityCount) => _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
         public void Run(ParallelRangeAction<T1, T2, T3> action) => _source.ParallelForRanges(action, MinimumEntityCount, BatchSize);
-    }
-    public interface IComponentAction<T1, T2, T3, T4> where T1 : struct where T2 : struct where T3 : struct where T4 : struct
-    {
-        void Execute(ref T1 c1, ref T2 c2, ref T3 c3, ref T4 c4);
     }
     public readonly struct Query<T1, T2, T3, T4> where T1 : struct where T2 : struct where T3 : struct where T4 : struct
     {
@@ -331,17 +266,6 @@ namespace LitheEcs
                     action.Execute(in entity, ref d1[n], ref d2[n], ref d3[n], ref d4[n]);
                 } } }
         }
-        [Obsolete("Use ForEach(ref action) instead. Omitting Entity access does not justify a separate action interface and iteration API.")]
-        public void ForEachComponents<TAction>(ref TAction action) where TAction : struct, IComponentAction<T1, T2, T3, T4>
-        { _plan.Ensure(); var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-            var d1 = archetype.GetColumn<T1>(chunk);
-            var d2 = archetype.GetColumn<T2>(chunk);
-            var d3 = archetype.GetColumn<T3>(chunk);
-            var d4 = archetype.GetColumn<T4>(chunk);
-            for (var n = 0; n < count; n++) {
-                action.Execute(ref d1[n], ref d2[n], ref d3[n], ref d4[n]);
-            } } }
-        }
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
           var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
@@ -380,28 +304,6 @@ namespace LitheEcs
           public RefTuple Current { get => new RefTuple(_d1!, _row, _d2!, _row, _d3!, _row, _d4!, _row); } }
         public bool TryGetAlignedChunk(out AlignedChunk chunk) { if (!_allowAligned) { chunk = default; return false; } _plan.Ensure(); Archetype? found = null; ArchetypeChunk? foundChunk = null; var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var candidate = matches[a]; for (var c = 0; c < candidate.Chunks.Count; c++) { var candidateChunk = candidate.Chunks[c]; if (candidateChunk.Count == 0) continue; if (foundChunk != null) { chunk = default; return false; } found = candidate; foundChunk = candidateChunk; } } if (foundChunk == null) { chunk = default; return true; }
           chunk = new AlignedChunk(found!.GetColumn<T1>(foundChunk), found!.GetColumn<T2>(foundChunk), found!.GetColumn<T3>(foundChunk), found!.GetColumn<T4>(foundChunk), foundChunk.Count); return true; }
-        [Obsolete("Use TryGetAlignedChunk(out chunk) instead.")] public AlignedEnumerable Aligned() => new AlignedEnumerable(this);
-        public readonly ref struct AlignedEnumerable { private readonly Query<T1, T2, T3, T4> _query; internal AlignedEnumerable(Query<T1, T2, T3, T4> query) => _query = query; public AlignedEnumerator GetEnumerator() { if (!_query._allowAligned) throw new InvalidOperationException("Query is filtered."); return new AlignedEnumerator(_query._world, _query._plan); } }
-        public ref struct AlignedEnumerator {
-          private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
-          private T1[]? _d1;
-          private T2[]? _d2;
-          private T3[]? _d3;
-          private T4[]? _d4;
-          internal AlignedEnumerator(World world, ArchetypeQueryPlan plan) { plan.Ensure(); _world = world; _version = world.StructuralVersion; _plan = plan; _a = 0; _c = 0; _row = -1; _count = 0; _d1 = null; _d2 = null; _d3 = null; _d4 = null; }
-          public bool MoveNext() { if (++_row < _count) return true; var matches = _plan.Matches; while (_a < matches.Count) { var archetype = matches[_a]; if (_c >= archetype.Chunks.Count) { _a++; _c = 0; continue; } var chunk = archetype.Chunks[_c++]; _count = chunk.Count; if (_count == 0) continue; _world.ValidateQueryStructuralVersion(_version);
- _d1 = archetype.GetColumn<T1>(chunk); _d2 = archetype.GetColumn<T2>(chunk); _d3 = archetype.GetColumn<T3>(chunk); _d4 = archetype.GetColumn<T4>(chunk); _row = 0; return true; } return false; }
-          public AlignedRefTuple Current => new AlignedRefTuple(_d1!, _d2!, _d3!, _d4!, _row); }
-        public readonly ref struct AlignedRefTuple {
-          private readonly T1[] _d1;
-          private readonly T2[] _d2;
-          private readonly T3[] _d3;
-          private readonly T4[] _d4;
-          private readonly int _index;
-          internal AlignedRefTuple(T1[] d1, T2[] d2, T3[] d3, T4[] d4, int index) {
- _d1 = d1; _d2 = d2; _d3 = d3; _d4 = d4; _index = index; }
-          public void Deconstruct(out Query<T1, T2>.RefItem<T1> c1, out Query<T1, T2>.RefItem<T2> c2, out Query<T1, T2>.RefItem<T3> c3, out Query<T1, T2>.RefItem<T4> c4) {
- c1 = new Query<T1, T2>.RefItem<T1>(_d1, _index); c2 = new Query<T1, T2>.RefItem<T2>(_d2, _index); c3 = new Query<T1, T2>.RefItem<T3>(_d3, _index); c4 = new Query<T1, T2>.RefItem<T4>(_d4, _index); } }
         public readonly ref struct AlignedChunk {
           public readonly Span<T1> Component1; internal readonly T1[] Array1;
           public readonly Span<T2> Component2; internal readonly T2[] Array2;
@@ -443,10 +345,6 @@ namespace LitheEcs
     public interface IQueryAction<T1, T2, T3, T4, T5> where T1 : struct where T2 : struct where T3 : struct where T4 : struct where T5 : struct
     {
         void Execute(in Entity entity, ref T1 c1, ref T2 c2, ref T3 c3, ref T4 c4, ref T5 c5);
-    }
-    public interface IComponentAction<T1, T2, T3, T4, T5> where T1 : struct where T2 : struct where T3 : struct where T4 : struct where T5 : struct
-    {
-        void Execute(ref T1 c1, ref T2 c2, ref T3 c3, ref T4 c4, ref T5 c5);
     }
     public readonly struct Query<T1, T2, T3, T4, T5> where T1 : struct where T2 : struct where T3 : struct where T4 : struct where T5 : struct
     {
@@ -490,18 +388,6 @@ namespace LitheEcs
                     action.Execute(in entity, ref d1[n], ref d2[n], ref d3[n], ref d4[n], ref d5[n]);
                 } } }
         }
-        [Obsolete("Use ForEach(ref action) instead. Omitting Entity access does not justify a separate action interface and iteration API.")]
-        public void ForEachComponents<TAction>(ref TAction action) where TAction : struct, IComponentAction<T1, T2, T3, T4, T5>
-        { _plan.Ensure(); var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-            var d1 = archetype.GetColumn<T1>(chunk);
-            var d2 = archetype.GetColumn<T2>(chunk);
-            var d3 = archetype.GetColumn<T3>(chunk);
-            var d4 = archetype.GetColumn<T4>(chunk);
-            var d5 = archetype.GetColumn<T5>(chunk);
-            for (var n = 0; n < count; n++) {
-                action.Execute(ref d1[n], ref d2[n], ref d3[n], ref d4[n], ref d5[n]);
-            } } }
-        }
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
           var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
@@ -543,30 +429,6 @@ namespace LitheEcs
           public RefTuple Current { get => new RefTuple(_d1!, _row, _d2!, _row, _d3!, _row, _d4!, _row, _d5!, _row); } }
         public bool TryGetAlignedChunk(out AlignedChunk chunk) { if (!_allowAligned) { chunk = default; return false; } _plan.Ensure(); Archetype? found = null; ArchetypeChunk? foundChunk = null; var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var candidate = matches[a]; for (var c = 0; c < candidate.Chunks.Count; c++) { var candidateChunk = candidate.Chunks[c]; if (candidateChunk.Count == 0) continue; if (foundChunk != null) { chunk = default; return false; } found = candidate; foundChunk = candidateChunk; } } if (foundChunk == null) { chunk = default; return true; }
           chunk = new AlignedChunk(found!.GetColumn<T1>(foundChunk), found!.GetColumn<T2>(foundChunk), found!.GetColumn<T3>(foundChunk), found!.GetColumn<T4>(foundChunk), found!.GetColumn<T5>(foundChunk), foundChunk.Count); return true; }
-        [Obsolete("Use TryGetAlignedChunk(out chunk) instead.")] public AlignedEnumerable Aligned() => new AlignedEnumerable(this);
-        public readonly ref struct AlignedEnumerable { private readonly Query<T1, T2, T3, T4, T5> _query; internal AlignedEnumerable(Query<T1, T2, T3, T4, T5> query) => _query = query; public AlignedEnumerator GetEnumerator() { if (!_query._allowAligned) throw new InvalidOperationException("Query is filtered."); return new AlignedEnumerator(_query._world, _query._plan); } }
-        public ref struct AlignedEnumerator {
-          private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
-          private T1[]? _d1;
-          private T2[]? _d2;
-          private T3[]? _d3;
-          private T4[]? _d4;
-          private T5[]? _d5;
-          internal AlignedEnumerator(World world, ArchetypeQueryPlan plan) { plan.Ensure(); _world = world; _version = world.StructuralVersion; _plan = plan; _a = 0; _c = 0; _row = -1; _count = 0; _d1 = null; _d2 = null; _d3 = null; _d4 = null; _d5 = null; }
-          public bool MoveNext() { if (++_row < _count) return true; var matches = _plan.Matches; while (_a < matches.Count) { var archetype = matches[_a]; if (_c >= archetype.Chunks.Count) { _a++; _c = 0; continue; } var chunk = archetype.Chunks[_c++]; _count = chunk.Count; if (_count == 0) continue; _world.ValidateQueryStructuralVersion(_version);
- _d1 = archetype.GetColumn<T1>(chunk); _d2 = archetype.GetColumn<T2>(chunk); _d3 = archetype.GetColumn<T3>(chunk); _d4 = archetype.GetColumn<T4>(chunk); _d5 = archetype.GetColumn<T5>(chunk); _row = 0; return true; } return false; }
-          public AlignedRefTuple Current => new AlignedRefTuple(_d1!, _d2!, _d3!, _d4!, _d5!, _row); }
-        public readonly ref struct AlignedRefTuple {
-          private readonly T1[] _d1;
-          private readonly T2[] _d2;
-          private readonly T3[] _d3;
-          private readonly T4[] _d4;
-          private readonly T5[] _d5;
-          private readonly int _index;
-          internal AlignedRefTuple(T1[] d1, T2[] d2, T3[] d3, T4[] d4, T5[] d5, int index) {
- _d1 = d1; _d2 = d2; _d3 = d3; _d4 = d4; _d5 = d5; _index = index; }
-          public void Deconstruct(out Query<T1, T2>.RefItem<T1> c1, out Query<T1, T2>.RefItem<T2> c2, out Query<T1, T2>.RefItem<T3> c3, out Query<T1, T2>.RefItem<T4> c4, out Query<T1, T2>.RefItem<T5> c5) {
- c1 = new Query<T1, T2>.RefItem<T1>(_d1, _index); c2 = new Query<T1, T2>.RefItem<T2>(_d2, _index); c3 = new Query<T1, T2>.RefItem<T3>(_d3, _index); c4 = new Query<T1, T2>.RefItem<T4>(_d4, _index); c5 = new Query<T1, T2>.RefItem<T5>(_d5, _index); } }
         public readonly ref struct AlignedChunk {
           public readonly Span<T1> Component1; internal readonly T1[] Array1;
           public readonly Span<T2> Component2; internal readonly T2[] Array2;
@@ -613,10 +475,6 @@ namespace LitheEcs
     {
         void Execute(in Entity entity, ref T1 c1, ref T2 c2, ref T3 c3, ref T4 c4, ref T5 c5, ref T6 c6);
     }
-    public interface IComponentAction<T1, T2, T3, T4, T5, T6> where T1 : struct where T2 : struct where T3 : struct where T4 : struct where T5 : struct where T6 : struct
-    {
-        void Execute(ref T1 c1, ref T2 c2, ref T3 c3, ref T4 c4, ref T5 c5, ref T6 c6);
-    }
     public readonly struct Query<T1, T2, T3, T4, T5, T6> where T1 : struct where T2 : struct where T3 : struct where T4 : struct where T5 : struct where T6 : struct
     {
         private static readonly int[] RequiredTypes = { ComponentType<T1>.Id, ComponentType<T2>.Id, ComponentType<T3>.Id, ComponentType<T4>.Id, ComponentType<T5>.Id, ComponentType<T6>.Id };
@@ -660,19 +518,6 @@ namespace LitheEcs
                 var entityIds = chunk.EntityIds; for (var n = 0; n < count; n++) { var entity = world.GetEntity(entityIds[n]);
                     action.Execute(in entity, ref d1[n], ref d2[n], ref d3[n], ref d4[n], ref d5[n], ref d6[n]);
                 } } }
-        }
-        [Obsolete("Use ForEach(ref action) instead. Omitting Entity access does not justify a separate action interface and iteration API.")]
-        public void ForEachComponents<TAction>(ref TAction action) where TAction : struct, IComponentAction<T1, T2, T3, T4, T5, T6>
-        { _plan.Ensure(); var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-            var d1 = archetype.GetColumn<T1>(chunk);
-            var d2 = archetype.GetColumn<T2>(chunk);
-            var d3 = archetype.GetColumn<T3>(chunk);
-            var d4 = archetype.GetColumn<T4>(chunk);
-            var d5 = archetype.GetColumn<T5>(chunk);
-            var d6 = archetype.GetColumn<T6>(chunk);
-            for (var n = 0; n < count; n++) {
-                action.Execute(ref d1[n], ref d2[n], ref d3[n], ref d4[n], ref d5[n], ref d6[n]);
-            } } }
         }
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
@@ -718,32 +563,6 @@ namespace LitheEcs
           public RefTuple Current { get => new RefTuple(_d1!, _row, _d2!, _row, _d3!, _row, _d4!, _row, _d5!, _row, _d6!, _row); } }
         public bool TryGetAlignedChunk(out AlignedChunk chunk) { if (!_allowAligned) { chunk = default; return false; } _plan.Ensure(); Archetype? found = null; ArchetypeChunk? foundChunk = null; var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var candidate = matches[a]; for (var c = 0; c < candidate.Chunks.Count; c++) { var candidateChunk = candidate.Chunks[c]; if (candidateChunk.Count == 0) continue; if (foundChunk != null) { chunk = default; return false; } found = candidate; foundChunk = candidateChunk; } } if (foundChunk == null) { chunk = default; return true; }
           chunk = new AlignedChunk(found!.GetColumn<T1>(foundChunk), found!.GetColumn<T2>(foundChunk), found!.GetColumn<T3>(foundChunk), found!.GetColumn<T4>(foundChunk), found!.GetColumn<T5>(foundChunk), found!.GetColumn<T6>(foundChunk), foundChunk.Count); return true; }
-        [Obsolete("Use TryGetAlignedChunk(out chunk) instead.")] public AlignedEnumerable Aligned() => new AlignedEnumerable(this);
-        public readonly ref struct AlignedEnumerable { private readonly Query<T1, T2, T3, T4, T5, T6> _query; internal AlignedEnumerable(Query<T1, T2, T3, T4, T5, T6> query) => _query = query; public AlignedEnumerator GetEnumerator() { if (!_query._allowAligned) throw new InvalidOperationException("Query is filtered."); return new AlignedEnumerator(_query._world, _query._plan); } }
-        public ref struct AlignedEnumerator {
-          private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
-          private T1[]? _d1;
-          private T2[]? _d2;
-          private T3[]? _d3;
-          private T4[]? _d4;
-          private T5[]? _d5;
-          private T6[]? _d6;
-          internal AlignedEnumerator(World world, ArchetypeQueryPlan plan) { plan.Ensure(); _world = world; _version = world.StructuralVersion; _plan = plan; _a = 0; _c = 0; _row = -1; _count = 0; _d1 = null; _d2 = null; _d3 = null; _d4 = null; _d5 = null; _d6 = null; }
-          public bool MoveNext() { if (++_row < _count) return true; var matches = _plan.Matches; while (_a < matches.Count) { var archetype = matches[_a]; if (_c >= archetype.Chunks.Count) { _a++; _c = 0; continue; } var chunk = archetype.Chunks[_c++]; _count = chunk.Count; if (_count == 0) continue; _world.ValidateQueryStructuralVersion(_version);
- _d1 = archetype.GetColumn<T1>(chunk); _d2 = archetype.GetColumn<T2>(chunk); _d3 = archetype.GetColumn<T3>(chunk); _d4 = archetype.GetColumn<T4>(chunk); _d5 = archetype.GetColumn<T5>(chunk); _d6 = archetype.GetColumn<T6>(chunk); _row = 0; return true; } return false; }
-          public AlignedRefTuple Current => new AlignedRefTuple(_d1!, _d2!, _d3!, _d4!, _d5!, _d6!, _row); }
-        public readonly ref struct AlignedRefTuple {
-          private readonly T1[] _d1;
-          private readonly T2[] _d2;
-          private readonly T3[] _d3;
-          private readonly T4[] _d4;
-          private readonly T5[] _d5;
-          private readonly T6[] _d6;
-          private readonly int _index;
-          internal AlignedRefTuple(T1[] d1, T2[] d2, T3[] d3, T4[] d4, T5[] d5, T6[] d6, int index) {
- _d1 = d1; _d2 = d2; _d3 = d3; _d4 = d4; _d5 = d5; _d6 = d6; _index = index; }
-          public void Deconstruct(out Query<T1, T2>.RefItem<T1> c1, out Query<T1, T2>.RefItem<T2> c2, out Query<T1, T2>.RefItem<T3> c3, out Query<T1, T2>.RefItem<T4> c4, out Query<T1, T2>.RefItem<T5> c5, out Query<T1, T2>.RefItem<T6> c6) {
- c1 = new Query<T1, T2>.RefItem<T1>(_d1, _index); c2 = new Query<T1, T2>.RefItem<T2>(_d2, _index); c3 = new Query<T1, T2>.RefItem<T3>(_d3, _index); c4 = new Query<T1, T2>.RefItem<T4>(_d4, _index); c5 = new Query<T1, T2>.RefItem<T5>(_d5, _index); c6 = new Query<T1, T2>.RefItem<T6>(_d6, _index); } }
         public readonly ref struct AlignedChunk {
           public readonly Span<T1> Component1; internal readonly T1[] Array1;
           public readonly Span<T2> Component2; internal readonly T2[] Array2;
@@ -794,10 +613,6 @@ namespace LitheEcs
     {
         void Execute(in Entity entity, ref T1 c1, ref T2 c2, ref T3 c3, ref T4 c4, ref T5 c5, ref T6 c6, ref T7 c7);
     }
-    public interface IComponentAction<T1, T2, T3, T4, T5, T6, T7> where T1 : struct where T2 : struct where T3 : struct where T4 : struct where T5 : struct where T6 : struct where T7 : struct
-    {
-        void Execute(ref T1 c1, ref T2 c2, ref T3 c3, ref T4 c4, ref T5 c5, ref T6 c6, ref T7 c7);
-    }
     public readonly struct Query<T1, T2, T3, T4, T5, T6, T7> where T1 : struct where T2 : struct where T3 : struct where T4 : struct where T5 : struct where T6 : struct where T7 : struct
     {
         private static readonly int[] RequiredTypes = { ComponentType<T1>.Id, ComponentType<T2>.Id, ComponentType<T3>.Id, ComponentType<T4>.Id, ComponentType<T5>.Id, ComponentType<T6>.Id, ComponentType<T7>.Id };
@@ -843,20 +658,6 @@ namespace LitheEcs
                 var entityIds = chunk.EntityIds; for (var n = 0; n < count; n++) { var entity = world.GetEntity(entityIds[n]);
                     action.Execute(in entity, ref d1[n], ref d2[n], ref d3[n], ref d4[n], ref d5[n], ref d6[n], ref d7[n]);
                 } } }
-        }
-        [Obsolete("Use ForEach(ref action) instead. Omitting Entity access does not justify a separate action interface and iteration API.")]
-        public void ForEachComponents<TAction>(ref TAction action) where TAction : struct, IComponentAction<T1, T2, T3, T4, T5, T6, T7>
-        { _plan.Ensure(); var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-            var d1 = archetype.GetColumn<T1>(chunk);
-            var d2 = archetype.GetColumn<T2>(chunk);
-            var d3 = archetype.GetColumn<T3>(chunk);
-            var d4 = archetype.GetColumn<T4>(chunk);
-            var d5 = archetype.GetColumn<T5>(chunk);
-            var d6 = archetype.GetColumn<T6>(chunk);
-            var d7 = archetype.GetColumn<T7>(chunk);
-            for (var n = 0; n < count; n++) {
-                action.Execute(ref d1[n], ref d2[n], ref d3[n], ref d4[n], ref d5[n], ref d6[n], ref d7[n]);
-            } } }
         }
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
@@ -905,34 +706,6 @@ namespace LitheEcs
           public RefTuple Current { get => new RefTuple(_d1!, _row, _d2!, _row, _d3!, _row, _d4!, _row, _d5!, _row, _d6!, _row, _d7!, _row); } }
         public bool TryGetAlignedChunk(out AlignedChunk chunk) { if (!_allowAligned) { chunk = default; return false; } _plan.Ensure(); Archetype? found = null; ArchetypeChunk? foundChunk = null; var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var candidate = matches[a]; for (var c = 0; c < candidate.Chunks.Count; c++) { var candidateChunk = candidate.Chunks[c]; if (candidateChunk.Count == 0) continue; if (foundChunk != null) { chunk = default; return false; } found = candidate; foundChunk = candidateChunk; } } if (foundChunk == null) { chunk = default; return true; }
           chunk = new AlignedChunk(found!.GetColumn<T1>(foundChunk), found!.GetColumn<T2>(foundChunk), found!.GetColumn<T3>(foundChunk), found!.GetColumn<T4>(foundChunk), found!.GetColumn<T5>(foundChunk), found!.GetColumn<T6>(foundChunk), found!.GetColumn<T7>(foundChunk), foundChunk.Count); return true; }
-        [Obsolete("Use TryGetAlignedChunk(out chunk) instead.")] public AlignedEnumerable Aligned() => new AlignedEnumerable(this);
-        public readonly ref struct AlignedEnumerable { private readonly Query<T1, T2, T3, T4, T5, T6, T7> _query; internal AlignedEnumerable(Query<T1, T2, T3, T4, T5, T6, T7> query) => _query = query; public AlignedEnumerator GetEnumerator() { if (!_query._allowAligned) throw new InvalidOperationException("Query is filtered."); return new AlignedEnumerator(_query._world, _query._plan); } }
-        public ref struct AlignedEnumerator {
-          private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
-          private T1[]? _d1;
-          private T2[]? _d2;
-          private T3[]? _d3;
-          private T4[]? _d4;
-          private T5[]? _d5;
-          private T6[]? _d6;
-          private T7[]? _d7;
-          internal AlignedEnumerator(World world, ArchetypeQueryPlan plan) { plan.Ensure(); _world = world; _version = world.StructuralVersion; _plan = plan; _a = 0; _c = 0; _row = -1; _count = 0; _d1 = null; _d2 = null; _d3 = null; _d4 = null; _d5 = null; _d6 = null; _d7 = null; }
-          public bool MoveNext() { if (++_row < _count) return true; var matches = _plan.Matches; while (_a < matches.Count) { var archetype = matches[_a]; if (_c >= archetype.Chunks.Count) { _a++; _c = 0; continue; } var chunk = archetype.Chunks[_c++]; _count = chunk.Count; if (_count == 0) continue; _world.ValidateQueryStructuralVersion(_version);
- _d1 = archetype.GetColumn<T1>(chunk); _d2 = archetype.GetColumn<T2>(chunk); _d3 = archetype.GetColumn<T3>(chunk); _d4 = archetype.GetColumn<T4>(chunk); _d5 = archetype.GetColumn<T5>(chunk); _d6 = archetype.GetColumn<T6>(chunk); _d7 = archetype.GetColumn<T7>(chunk); _row = 0; return true; } return false; }
-          public AlignedRefTuple Current => new AlignedRefTuple(_d1!, _d2!, _d3!, _d4!, _d5!, _d6!, _d7!, _row); }
-        public readonly ref struct AlignedRefTuple {
-          private readonly T1[] _d1;
-          private readonly T2[] _d2;
-          private readonly T3[] _d3;
-          private readonly T4[] _d4;
-          private readonly T5[] _d5;
-          private readonly T6[] _d6;
-          private readonly T7[] _d7;
-          private readonly int _index;
-          internal AlignedRefTuple(T1[] d1, T2[] d2, T3[] d3, T4[] d4, T5[] d5, T6[] d6, T7[] d7, int index) {
- _d1 = d1; _d2 = d2; _d3 = d3; _d4 = d4; _d5 = d5; _d6 = d6; _d7 = d7; _index = index; }
-          public void Deconstruct(out Query<T1, T2>.RefItem<T1> c1, out Query<T1, T2>.RefItem<T2> c2, out Query<T1, T2>.RefItem<T3> c3, out Query<T1, T2>.RefItem<T4> c4, out Query<T1, T2>.RefItem<T5> c5, out Query<T1, T2>.RefItem<T6> c6, out Query<T1, T2>.RefItem<T7> c7) {
- c1 = new Query<T1, T2>.RefItem<T1>(_d1, _index); c2 = new Query<T1, T2>.RefItem<T2>(_d2, _index); c3 = new Query<T1, T2>.RefItem<T3>(_d3, _index); c4 = new Query<T1, T2>.RefItem<T4>(_d4, _index); c5 = new Query<T1, T2>.RefItem<T5>(_d5, _index); c6 = new Query<T1, T2>.RefItem<T6>(_d6, _index); c7 = new Query<T1, T2>.RefItem<T7>(_d7, _index); } }
         public readonly ref struct AlignedChunk {
           public readonly Span<T1> Component1; internal readonly T1[] Array1;
           public readonly Span<T2> Component2; internal readonly T2[] Array2;
@@ -987,10 +760,6 @@ namespace LitheEcs
     {
         void Execute(in Entity entity, ref T1 c1, ref T2 c2, ref T3 c3, ref T4 c4, ref T5 c5, ref T6 c6, ref T7 c7, ref T8 c8);
     }
-    public interface IComponentAction<T1, T2, T3, T4, T5, T6, T7, T8> where T1 : struct where T2 : struct where T3 : struct where T4 : struct where T5 : struct where T6 : struct where T7 : struct where T8 : struct
-    {
-        void Execute(ref T1 c1, ref T2 c2, ref T3 c3, ref T4 c4, ref T5 c5, ref T6 c6, ref T7 c7, ref T8 c8);
-    }
     public readonly struct Query<T1, T2, T3, T4, T5, T6, T7, T8> where T1 : struct where T2 : struct where T3 : struct where T4 : struct where T5 : struct where T6 : struct where T7 : struct where T8 : struct
     {
         private static readonly int[] RequiredTypes = { ComponentType<T1>.Id, ComponentType<T2>.Id, ComponentType<T3>.Id, ComponentType<T4>.Id, ComponentType<T5>.Id, ComponentType<T6>.Id, ComponentType<T7>.Id, ComponentType<T8>.Id };
@@ -1038,21 +807,6 @@ namespace LitheEcs
                 var entityIds = chunk.EntityIds; for (var n = 0; n < count; n++) { var entity = world.GetEntity(entityIds[n]);
                     action.Execute(in entity, ref d1[n], ref d2[n], ref d3[n], ref d4[n], ref d5[n], ref d6[n], ref d7[n], ref d8[n]);
                 } } }
-        }
-        [Obsolete("Use ForEach(ref action) instead. Omitting Entity access does not justify a separate action interface and iteration API.")]
-        public void ForEachComponents<TAction>(ref TAction action) where TAction : struct, IComponentAction<T1, T2, T3, T4, T5, T6, T7, T8>
-        { _plan.Ensure(); var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-            var d1 = archetype.GetColumn<T1>(chunk);
-            var d2 = archetype.GetColumn<T2>(chunk);
-            var d3 = archetype.GetColumn<T3>(chunk);
-            var d4 = archetype.GetColumn<T4>(chunk);
-            var d5 = archetype.GetColumn<T5>(chunk);
-            var d6 = archetype.GetColumn<T6>(chunk);
-            var d7 = archetype.GetColumn<T7>(chunk);
-            var d8 = archetype.GetColumn<T8>(chunk);
-            for (var n = 0; n < count; n++) {
-                action.Execute(ref d1[n], ref d2[n], ref d3[n], ref d4[n], ref d5[n], ref d6[n], ref d7[n], ref d8[n]);
-            } } }
         }
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
@@ -1104,36 +858,6 @@ namespace LitheEcs
           public RefTuple Current { get => new RefTuple(_d1!, _row, _d2!, _row, _d3!, _row, _d4!, _row, _d5!, _row, _d6!, _row, _d7!, _row, _d8!, _row); } }
         public bool TryGetAlignedChunk(out AlignedChunk chunk) { if (!_allowAligned) { chunk = default; return false; } _plan.Ensure(); Archetype? found = null; ArchetypeChunk? foundChunk = null; var matches = _plan.Matches; for (var a = 0; a < matches.Count; a++) { var candidate = matches[a]; for (var c = 0; c < candidate.Chunks.Count; c++) { var candidateChunk = candidate.Chunks[c]; if (candidateChunk.Count == 0) continue; if (foundChunk != null) { chunk = default; return false; } found = candidate; foundChunk = candidateChunk; } } if (foundChunk == null) { chunk = default; return true; }
           chunk = new AlignedChunk(found!.GetColumn<T1>(foundChunk), found!.GetColumn<T2>(foundChunk), found!.GetColumn<T3>(foundChunk), found!.GetColumn<T4>(foundChunk), found!.GetColumn<T5>(foundChunk), found!.GetColumn<T6>(foundChunk), found!.GetColumn<T7>(foundChunk), found!.GetColumn<T8>(foundChunk), foundChunk.Count); return true; }
-        [Obsolete("Use TryGetAlignedChunk(out chunk) instead.")] public AlignedEnumerable Aligned() => new AlignedEnumerable(this);
-        public readonly ref struct AlignedEnumerable { private readonly Query<T1, T2, T3, T4, T5, T6, T7, T8> _query; internal AlignedEnumerable(Query<T1, T2, T3, T4, T5, T6, T7, T8> query) => _query = query; public AlignedEnumerator GetEnumerator() { if (!_query._allowAligned) throw new InvalidOperationException("Query is filtered."); return new AlignedEnumerator(_query._world, _query._plan); } }
-        public ref struct AlignedEnumerator {
-          private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
-          private T1[]? _d1;
-          private T2[]? _d2;
-          private T3[]? _d3;
-          private T4[]? _d4;
-          private T5[]? _d5;
-          private T6[]? _d6;
-          private T7[]? _d7;
-          private T8[]? _d8;
-          internal AlignedEnumerator(World world, ArchetypeQueryPlan plan) { plan.Ensure(); _world = world; _version = world.StructuralVersion; _plan = plan; _a = 0; _c = 0; _row = -1; _count = 0; _d1 = null; _d2 = null; _d3 = null; _d4 = null; _d5 = null; _d6 = null; _d7 = null; _d8 = null; }
-          public bool MoveNext() { if (++_row < _count) return true; var matches = _plan.Matches; while (_a < matches.Count) { var archetype = matches[_a]; if (_c >= archetype.Chunks.Count) { _a++; _c = 0; continue; } var chunk = archetype.Chunks[_c++]; _count = chunk.Count; if (_count == 0) continue; _world.ValidateQueryStructuralVersion(_version);
- _d1 = archetype.GetColumn<T1>(chunk); _d2 = archetype.GetColumn<T2>(chunk); _d3 = archetype.GetColumn<T3>(chunk); _d4 = archetype.GetColumn<T4>(chunk); _d5 = archetype.GetColumn<T5>(chunk); _d6 = archetype.GetColumn<T6>(chunk); _d7 = archetype.GetColumn<T7>(chunk); _d8 = archetype.GetColumn<T8>(chunk); _row = 0; return true; } return false; }
-          public AlignedRefTuple Current => new AlignedRefTuple(_d1!, _d2!, _d3!, _d4!, _d5!, _d6!, _d7!, _d8!, _row); }
-        public readonly ref struct AlignedRefTuple {
-          private readonly T1[] _d1;
-          private readonly T2[] _d2;
-          private readonly T3[] _d3;
-          private readonly T4[] _d4;
-          private readonly T5[] _d5;
-          private readonly T6[] _d6;
-          private readonly T7[] _d7;
-          private readonly T8[] _d8;
-          private readonly int _index;
-          internal AlignedRefTuple(T1[] d1, T2[] d2, T3[] d3, T4[] d4, T5[] d5, T6[] d6, T7[] d7, T8[] d8, int index) {
- _d1 = d1; _d2 = d2; _d3 = d3; _d4 = d4; _d5 = d5; _d6 = d6; _d7 = d7; _d8 = d8; _index = index; }
-          public void Deconstruct(out Query<T1, T2>.RefItem<T1> c1, out Query<T1, T2>.RefItem<T2> c2, out Query<T1, T2>.RefItem<T3> c3, out Query<T1, T2>.RefItem<T4> c4, out Query<T1, T2>.RefItem<T5> c5, out Query<T1, T2>.RefItem<T6> c6, out Query<T1, T2>.RefItem<T7> c7, out Query<T1, T2>.RefItem<T8> c8) {
- c1 = new Query<T1, T2>.RefItem<T1>(_d1, _index); c2 = new Query<T1, T2>.RefItem<T2>(_d2, _index); c3 = new Query<T1, T2>.RefItem<T3>(_d3, _index); c4 = new Query<T1, T2>.RefItem<T4>(_d4, _index); c5 = new Query<T1, T2>.RefItem<T5>(_d5, _index); c6 = new Query<T1, T2>.RefItem<T6>(_d6, _index); c7 = new Query<T1, T2>.RefItem<T7>(_d7, _index); c8 = new Query<T1, T2>.RefItem<T8>(_d8, _index); } }
         public readonly ref struct AlignedChunk {
           public readonly Span<T1> Component1; internal readonly T1[] Array1;
           public readonly Span<T2> Component2; internal readonly T2[] Array2;
