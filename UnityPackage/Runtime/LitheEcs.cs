@@ -1227,6 +1227,10 @@ namespace LitheEcs
         public readonly Memory<T2> Components2;
         internal JobQueryRange(Memory<T1> components1, Memory<T2> components2)
         {
+#if _INTERNAL_DERIVED_USE_VALIDATION
+            if (components1.Length != components2.Length)
+                throw new InvalidOperationException("Job Query component ranges must have the same length.");
+#endif
             Components1 = components1;
             Components2 = components2;
         }
@@ -1241,6 +1245,10 @@ namespace LitheEcs
         public readonly Memory<T3> Components3;
         internal JobQueryRange(Memory<T1> components1, Memory<T2> components2, Memory<T3> components3)
         {
+#if _INTERNAL_DERIVED_USE_VALIDATION
+            if (components1.Length != components2.Length || components1.Length != components3.Length)
+                throw new InvalidOperationException("Job Query component ranges must have the same length.");
+#endif
             Components1 = components1;
             Components2 = components2;
             Components3 = components3;

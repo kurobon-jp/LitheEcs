@@ -24,6 +24,8 @@ namespace LitheEcs.Unity.Jobs
         public void Reserve(int maximumEntityCount) => Source.ReserveBurstUnsafe(maximumEntityCount, BatchSize);
         public void Run<TAction>(ref TAction action) where TAction : unmanaged, IBurstQueryAction<T1> =>
             Source.RunBurst(ref action, BatchSize);
+        /// <summary>Runs synchronously through direct pointers without NativeContainer safety checks.</summary>
+        /// <remarks>Do not access the same Component columns concurrently or retain pointers or JobHandles outside this call. Use <see cref="Run{TAction}"/> when safety checks are required.</remarks>
         public void RunUnsafe<TAction>(ref TAction action) where TAction : unmanaged, IBurstQueryAction<T1> =>
             Source.RunBurstUnsafe(ref action, BatchSize);
     }
@@ -43,6 +45,8 @@ namespace LitheEcs.Unity.Jobs
         public void Reserve(int maximumEntityCount) => Source.ReserveBurstUnsafe(maximumEntityCount, BatchSize);
         public void Run<TAction>(ref TAction action) where TAction : unmanaged, IBurstQueryAction<T1, T2> =>
             Source.RunBurst(ref action, BatchSize);
+        /// <summary>Runs synchronously through direct pointers without NativeContainer safety checks.</summary>
+        /// <remarks>Do not access the same Component columns concurrently or retain pointers or JobHandles outside this call. Use <see cref="Run{TAction}"/> when safety checks are required.</remarks>
         public void RunUnsafe<TAction>(ref TAction action) where TAction : unmanaged, IBurstQueryAction<T1, T2> =>
             Source.RunBurstUnsafe(ref action, BatchSize);
     }
@@ -63,6 +67,8 @@ namespace LitheEcs.Unity.Jobs
         public void Reserve(int maximumEntityCount) => Source.ReserveBurstUnsafe(maximumEntityCount, BatchSize);
         public void Run<TAction>(ref TAction action) where TAction : unmanaged, IBurstQueryAction<T1, T2, T3> =>
             Source.RunBurst(ref action, BatchSize);
+        /// <summary>Runs synchronously through direct pointers without NativeContainer safety checks.</summary>
+        /// <remarks>Do not access the same Component columns concurrently or retain pointers or JobHandles outside this call. Use <see cref="Run{TAction}"/> when safety checks are required.</remarks>
         public void RunUnsafe<TAction>(ref TAction action)
             where TAction : unmanaged, IBurstQueryAction<T1, T2, T3> =>
             Source.RunBurstUnsafe(ref action, BatchSize);
@@ -256,6 +262,8 @@ namespace LitheEcs.Unity.Jobs
             UnsafeBuffers<T1, T2, T3>.EnsureCapacity(rangeCount, workCount);
         }
 
+        /// <summary>Runs synchronously through direct pointers without NativeContainer bounds, alias, or dependency checks.</summary>
+        /// <remarks>Do not access the same Component columns concurrently or retain pointers or JobHandles outside this call. Use <see cref="RunBurst{TAction,T1}(JobQuery{T1},ref TAction,int)"/> when safety checks are required.</remarks>
         public static unsafe void RunBurstUnsafe<TAction, T1>(this JobQuery<T1> query, ref TAction action,
             int innerLoopBatchCount = 128)
             where TAction : unmanaged, IBurstQueryAction<T1>
@@ -290,6 +298,8 @@ namespace LitheEcs.Unity.Jobs
             }
         }
 
+        /// <summary>Runs synchronously through direct pointers without NativeContainer bounds, alias, or dependency checks.</summary>
+        /// <remarks>Do not access the same Component columns concurrently or retain pointers or JobHandles outside this call. Use <see cref="RunBurst{TAction,T1,T2}(JobQuery{T1,T2},ref TAction,int)"/> when safety checks are required.</remarks>
         public static unsafe void RunBurstUnsafe<TAction, T1, T2>(this JobQuery<T1, T2> query, ref TAction action,
             int innerLoopBatchCount = 128)
             where TAction : unmanaged, IBurstQueryAction<T1, T2>
@@ -324,6 +334,8 @@ namespace LitheEcs.Unity.Jobs
             }
         }
 
+        /// <summary>Runs synchronously through direct pointers without NativeContainer bounds, alias, or dependency checks.</summary>
+        /// <remarks>Do not access the same Component columns concurrently or retain pointers or JobHandles outside this call. Use <see cref="RunBurst{TAction,T1,T2,T3}(JobQuery{T1,T2,T3},ref TAction,int)"/> when safety checks are required.</remarks>
         public static unsafe void RunBurstUnsafe<TAction, T1, T2, T3>(this JobQuery<T1, T2, T3> query,
             ref TAction action, int innerLoopBatchCount = 128)
             where TAction : unmanaged, IBurstQueryAction<T1, T2, T3>

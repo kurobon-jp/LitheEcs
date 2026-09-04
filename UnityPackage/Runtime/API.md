@@ -99,7 +99,8 @@ bool has = world.HasComponent<Position>(entity);
 bool removed = world.RemoveComponent<Position>(entity);
 ```
 
-Adding an existing component replaces its value. Getting a missing component is invalid.
+Adding an existing component replaces its value. Getting a component that the Entity does not
+contain throws `KeyNotFoundException`.
 
 When runtime validation is compiled in, using a `Ref<T>` after a structural change involving the
 same component type throws `InvalidOperationException`. In all configurations, do not retain

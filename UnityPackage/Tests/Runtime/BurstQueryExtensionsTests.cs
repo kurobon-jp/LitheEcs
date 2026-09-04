@@ -37,6 +37,28 @@ namespace LitheEcs.Unity.Jobs.Tests
         }
 
         [Test]
+        public void AcquireRanges_ShouldExposeAlignedLengthsForMinimumAndMaximumArities()
+        {
+            using var world = new World();
+            var entity = world.Spawn();
+            entity.Add(new C1(), new C2(), new C3());
+
+            using (var ranges = world.Query<C1>().AsJobQuery().AcquireRanges())
+            {
+                Assert.That(ranges.RangeCount, Is.EqualTo(1));
+                Assert.That(ranges.GetRange(0).Length, Is.EqualTo(1));
+            }
+
+            using (var ranges = world.Query<C1, C2, C3>().AsJobQuery().AcquireRanges())
+            {
+                Assert.That(ranges.RangeCount, Is.EqualTo(1));
+                var range = ranges.GetRange(0);
+                Assert.That(range.Components2.Length, Is.EqualTo(range.Length));
+                Assert.That(range.Components3.Length, Is.EqualTo(range.Length));
+            }
+        }
+
+        [Test]
         public void ReserveBurstUnsafe_ShouldPrepareAllSupportedAritiesWithoutExecutingActions()
         {
             using var world = new World();
