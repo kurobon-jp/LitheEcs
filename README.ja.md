@@ -1,3 +1,5 @@
+![LitheEcs — Small. Fast. Predictable.](docs/assets//litheecs-banner.png)
+
 # LitheEcs
 
 日本語 | [English](README.md) | [APIリファレンス](LitheEcs/API.ja.md)
