@@ -210,10 +210,18 @@ public sealed class QueryGenerator : ISourceGenerator
         source.AppendLine("        private sealed class ParallelRangeJob : ParallelQueryJob");
         source.AppendLine("        { internal World World = null!;");
         source.Append("            internal ParallelRangeAction<").Append(types).AppendLine("> Action = null!;");
+        for (var i = 1; i <= arity; i++) source.Append("            private int[] _c").Append(i).AppendLine(" = Array.Empty<int>();");
+        source.AppendLine("            protected override void PrepareMatches(System.Collections.Generic.List<Archetype> matches) { var capacity = matches.Count;");
+        for (var i = 1; i <= arity; i++)
+            source.Append("                if (_c").Append(i).Append(".Length < capacity) _c").Append(i).AppendLine(" = new int[Math.Max(capacity, _c" + i + ".Length == 0 ? 4 : _c" + i + ".Length * 2)];");
+        source.AppendLine("                for (var n = 0; n < capacity; n++) { var archetype = matches[n];");
+        for (var i = 1; i <= arity; i++)
+            source.Append("                    _c").Append(i).Append("[n] = archetype.GetColumnIndex(ComponentType<T").Append(i).AppendLine(">.Id);");
+        source.AppendLine("                } }");
         source.AppendLine("            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start;");
         source.Append("                Action(");
         for (var i = 1; i <= arity; i++)
-            source.Append(i == 1 ? "" : ", ").Append("archetype.GetColumn<T").Append(i).Append(">(chunk).AsSpan(item.Start, length)");
+            source.Append(i == 1 ? "" : ", ").Append("archetype.GetColumn<T").Append(i).Append(">(chunk, _c").Append(i).Append("[item.MatchIndex]).AsSpan(item.Start, length)");
         source.AppendLine(", new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset)); } }");
     }
 

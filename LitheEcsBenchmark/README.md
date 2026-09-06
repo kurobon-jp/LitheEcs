@@ -75,6 +75,23 @@ type IDs and IDs beyond the 256-entry inline lookup range.
 dotnet run -c Release --project LitheEcsBenchmark -- --filter *ComponentTypeOverflowBenchmark*
 ```
 
+### Parallel query worker count
+
+`ParallelQueryWorkerCountBenchmark` measures the LitheEcs range workload with 1, 2, 4, 6, and 12
+total participating threads at 100,000 and 1,000,000 entities. It is used to choose the internal
+default worker count without adding worker configuration to the public API.
+
+```powershell
+dotnet run -c Release --project LitheEcsBenchmark -- --filter *ParallelQueryWorkerCountBenchmark*
+```
+
+`ParallelQueryActiveWorkerTuningBenchmark` sweeps 4,096 through 100,000 entities and the target
+entity count per active thread used by the adaptive scheduler.
+
+```powershell
+dotnet run -c Release --project LitheEcsBenchmark -- --filter *ParallelQueryActiveWorkerTuningBenchmark*
+```
+
 Use a class and method filter to investigate a named hot path, for example:
 
 ```powershell

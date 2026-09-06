@@ -3223,6 +3223,71 @@ namespace LitheEcs.Tests
         }
 
         [Test]
+        public void ParallelQuery_ShouldUseExpectedDefaultsForMinimumAndMaximumArities()
+        {
+            var one = _world.Query<Position>().AsParallelQuery();
+            var eight = _world.Query<Position, Velocity, Acceleration, Health, Player, Disabled, Grounded, Flying>()
+                .AsParallelQuery();
+
+            Assert.That(one.MinimumEntityCount, Is.EqualTo(4096));
+            Assert.That(one.BatchSize, Is.EqualTo(4096));
+            Assert.That(eight.MinimumEntityCount, Is.EqualTo(4096));
+            Assert.That(eight.BatchSize, Is.EqualTo(4096));
+        }
+
+        [Test]
+        public void ParallelForRanges_ShouldProcessEveryPageWhenOneClaimContainsMultiplePages()
+        {
+            const int entityCount = 8192;
+            _world.CreateTemplate().Add(new Position()).SpawnBatch(entityCount);
+            var callbackCount = 0;
+
+            _world.Query<Position>().AsParallelQuery(1, 4096).Run((positions, _) =>
+            {
+                Interlocked.Increment(ref callbackCount);
+                for (var i = 0; i < positions.Length; i++) positions[i].Value.X++;
+            });
+
+            Assert.That(callbackCount, Is.EqualTo(entityCount / 256));
+            var updated = 0;
+            foreach (ref var position in _world.Query<Position>())
+                if (position.Value.X == 1) updated++;
+            Assert.That(updated, Is.EqualTo(entityCount));
+        }
+
+        [Test]
+        public void ParallelQuery_ShouldRefreshCachedRangesAfterArchetypeContentChanges()
+        {
+            var first = _world.Spawn();
+            first.Add(new Position());
+            var query = _world.Query<Position>().AsParallelQuery(1, 4096);
+
+            query.Run(static (positions, _) =>
+            {
+                for (var i = 0; i < positions.Length; i++) positions[i].Value.X++;
+            });
+
+            var second = _world.Spawn();
+            second.Add(new Position());
+            first.Add(new Health()); // Moves between two archetypes that both match Query<Position>.
+            query.Run(static (positions, _) =>
+            {
+                for (var i = 0; i < positions.Length; i++) positions[i].Value.X++;
+            });
+
+            _world.Despawn(first);
+            query.Run(static (positions, _) =>
+            {
+                for (var i = 0; i < positions.Length; i++) positions[i].Value.X++;
+            });
+
+            Assert.That(second.Get<Position>().Value.X, Is.EqualTo(2));
+            var remaining = 0;
+            foreach (ref var position in _world.Query<Position>()) remaining++;
+            Assert.That(remaining, Is.EqualTo(1));
+        }
+
+        [Test]
         public void ParallelQuery_ShouldRejectStructuralChangesAndReleaseWorldAfterFailure()
         {
             var entity = _world.Spawn();
