@@ -13,7 +13,6 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 
 [assembly: InternalsVisibleTo("LitheEcs.Unity.Jobs")]
-[assembly: InternalsVisibleTo("LitheEcsBenchmark")]
 
 namespace LitheEcs
 {

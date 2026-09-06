@@ -21,7 +21,7 @@ public class ParallelQueryActiveWorkerTuningBenchmark
     public void Setup()
     {
         _world = new World(EntityCount);
-        _world.ConfigureParallelQueryScheduling(32_768, EntitiesPerThread);
+        ParallelQueryBenchmarkConfiguration.SetScheduling(_world, 32_768, EntitiesPerThread);
         _world.CreateTemplate()
             .Add(new Position())
             .Add(new Velocity { X = 1, Y = 1, Z = 1 })

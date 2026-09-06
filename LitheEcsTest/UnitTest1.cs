@@ -3289,6 +3289,28 @@ namespace LitheEcs.Tests
             Assert.That(updated, Is.EqualTo(entityCount));
         }
 
+        [TestCase(32_768)]
+        [TestCase(100_000)]
+        [TestCase(100_001)]
+        [TestCase(1_000_000)]
+        public void ParallelQuery_SchedulingModes_ShouldProcessEveryEntityExactlyOnce(int entityCount)
+        {
+            _world.CreateTemplate().Add(new Position()).SpawnBatch(entityCount);
+            var processed = 0;
+
+            _world.Query<Position>().AsParallelQuery(1, 2_048).Run((positions, _) =>
+            {
+                Interlocked.Add(ref processed, positions.Length);
+                for (var i = 0; i < positions.Length; i++) positions[i].Value.X++;
+            });
+
+            var updated = 0;
+            foreach (ref var position in _world.Query<Position>())
+                if (position.Value.X == 1) updated++;
+            Assert.That(processed, Is.EqualTo(entityCount));
+            Assert.That(updated, Is.EqualTo(entityCount));
+        }
+
         [Test]
         public void ParallelQuery_ShouldRefreshCachedRangesAfterArchetypeContentChanges()
         {

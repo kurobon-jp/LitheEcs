@@ -22,7 +22,7 @@ public class ParallelQueryWorkerCountBenchmark
     public void Setup()
     {
         _world = new World(EntityCount);
-        _world.ConfigureParallelQueryWorkerCount(TotalThreads - 1);
+        ParallelQueryBenchmarkConfiguration.SetWorkerCount(_world, TotalThreads - 1);
         _world.CreateTemplate()
             .Add(new Position())
             .Add(new Velocity { X = 1, Y = 1, Z = 1 })
