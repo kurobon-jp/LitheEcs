@@ -50,7 +50,7 @@ namespace LitheEcs
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
           var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
-          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); }
+          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); job.EnsureMatchCapacity(_plan.Matches.Count); }
         internal void ParallelForRanges(ParallelRangeAction<T1, T2> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
@@ -62,9 +62,12 @@ namespace LitheEcs
             internal ParallelRangeAction<T1, T2> Action = null!;
             private int[] _c1 = Array.Empty<int>();
             private int[] _c2 = Array.Empty<int>();
+            protected override void EnsureDerivedMatchCapacity(int capacity) {
+                if (_c1.Length < capacity) _c1 = new int[capacity];
+                if (_c2.Length < capacity) _c2 = new int[capacity];
+            }
             protected override void PrepareMatches(System.Collections.Generic.List<Archetype> matches) { var capacity = matches.Count;
-                if (_c1.Length < capacity) _c1 = new int[Math.Max(capacity, _c1.Length == 0 ? 4 : _c1.Length * 2)];
-                if (_c2.Length < capacity) _c2 = new int[Math.Max(capacity, _c2.Length == 0 ? 4 : _c2.Length * 2)];
+                EnsureDerivedMatchCapacity(capacity);
                 for (var n = 0; n < capacity; n++) { var archetype = matches[n];
                     _c1[n] = archetype.GetColumnIndex(ComponentType<T1>.Id);
                     _c2[n] = archetype.GetColumnIndex(ComponentType<T2>.Id);
@@ -120,6 +123,7 @@ namespace LitheEcs
         public int BatchSize { get; }
         internal ParallelQuery(Query<T1, T2> source, int minimumEntityCount, int batchSize)
         { if (minimumEntityCount < 1) throw new ArgumentOutOfRangeException(nameof(minimumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _source = source; MinimumEntityCount = minimumEntityCount; BatchSize = batchSize; }
+        /// <summary>Preallocates work ranges and current matching-archetype metadata.</summary>
         public void Reserve(int maximumEntityCount) => _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
         public void Run(ParallelRangeAction<T1, T2> action) => _source.ParallelForRanges(action, MinimumEntityCount, BatchSize);
     }
@@ -171,7 +175,7 @@ namespace LitheEcs
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
           var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
-          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); }
+          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); job.EnsureMatchCapacity(_plan.Matches.Count); }
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
@@ -184,10 +188,13 @@ namespace LitheEcs
             private int[] _c1 = Array.Empty<int>();
             private int[] _c2 = Array.Empty<int>();
             private int[] _c3 = Array.Empty<int>();
+            protected override void EnsureDerivedMatchCapacity(int capacity) {
+                if (_c1.Length < capacity) _c1 = new int[capacity];
+                if (_c2.Length < capacity) _c2 = new int[capacity];
+                if (_c3.Length < capacity) _c3 = new int[capacity];
+            }
             protected override void PrepareMatches(System.Collections.Generic.List<Archetype> matches) { var capacity = matches.Count;
-                if (_c1.Length < capacity) _c1 = new int[Math.Max(capacity, _c1.Length == 0 ? 4 : _c1.Length * 2)];
-                if (_c2.Length < capacity) _c2 = new int[Math.Max(capacity, _c2.Length == 0 ? 4 : _c2.Length * 2)];
-                if (_c3.Length < capacity) _c3 = new int[Math.Max(capacity, _c3.Length == 0 ? 4 : _c3.Length * 2)];
+                EnsureDerivedMatchCapacity(capacity);
                 for (var n = 0; n < capacity; n++) { var archetype = matches[n];
                     _c1[n] = archetype.GetColumnIndex(ComponentType<T1>.Id);
                     _c2[n] = archetype.GetColumnIndex(ComponentType<T2>.Id);
@@ -244,6 +251,7 @@ namespace LitheEcs
         public int BatchSize { get; }
         internal ParallelQuery(Query<T1, T2, T3> source, int minimumEntityCount, int batchSize)
         { if (minimumEntityCount < 1) throw new ArgumentOutOfRangeException(nameof(minimumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _source = source; MinimumEntityCount = minimumEntityCount; BatchSize = batchSize; }
+        /// <summary>Preallocates work ranges and current matching-archetype metadata.</summary>
         public void Reserve(int maximumEntityCount) => _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
         public void Run(ParallelRangeAction<T1, T2, T3> action) => _source.ParallelForRanges(action, MinimumEntityCount, BatchSize);
     }
@@ -290,7 +298,7 @@ namespace LitheEcs
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
           var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
-          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); }
+          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); job.EnsureMatchCapacity(_plan.Matches.Count); }
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3, T4> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
@@ -304,11 +312,14 @@ namespace LitheEcs
             private int[] _c2 = Array.Empty<int>();
             private int[] _c3 = Array.Empty<int>();
             private int[] _c4 = Array.Empty<int>();
+            protected override void EnsureDerivedMatchCapacity(int capacity) {
+                if (_c1.Length < capacity) _c1 = new int[capacity];
+                if (_c2.Length < capacity) _c2 = new int[capacity];
+                if (_c3.Length < capacity) _c3 = new int[capacity];
+                if (_c4.Length < capacity) _c4 = new int[capacity];
+            }
             protected override void PrepareMatches(System.Collections.Generic.List<Archetype> matches) { var capacity = matches.Count;
-                if (_c1.Length < capacity) _c1 = new int[Math.Max(capacity, _c1.Length == 0 ? 4 : _c1.Length * 2)];
-                if (_c2.Length < capacity) _c2 = new int[Math.Max(capacity, _c2.Length == 0 ? 4 : _c2.Length * 2)];
-                if (_c3.Length < capacity) _c3 = new int[Math.Max(capacity, _c3.Length == 0 ? 4 : _c3.Length * 2)];
-                if (_c4.Length < capacity) _c4 = new int[Math.Max(capacity, _c4.Length == 0 ? 4 : _c4.Length * 2)];
+                EnsureDerivedMatchCapacity(capacity);
                 for (var n = 0; n < capacity; n++) { var archetype = matches[n];
                     _c1[n] = archetype.GetColumnIndex(ComponentType<T1>.Id);
                     _c2[n] = archetype.GetColumnIndex(ComponentType<T2>.Id);
@@ -373,6 +384,7 @@ namespace LitheEcs
         public int BatchSize { get; }
         internal ParallelQuery(Query<T1, T2, T3, T4> source, int minimumEntityCount, int batchSize)
         { if (minimumEntityCount < 1) throw new ArgumentOutOfRangeException(nameof(minimumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _source = source; MinimumEntityCount = minimumEntityCount; BatchSize = batchSize; }
+        /// <summary>Preallocates work ranges and current matching-archetype metadata.</summary>
         public void Reserve(int maximumEntityCount) => _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
         public void Run(ParallelRangeAction<T1, T2, T3, T4> action) => _source.ParallelForRanges(action, MinimumEntityCount, BatchSize);
     }
@@ -427,7 +439,7 @@ namespace LitheEcs
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
           var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
-          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); }
+          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); job.EnsureMatchCapacity(_plan.Matches.Count); }
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3, T4, T5> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
@@ -442,12 +454,15 @@ namespace LitheEcs
             private int[] _c3 = Array.Empty<int>();
             private int[] _c4 = Array.Empty<int>();
             private int[] _c5 = Array.Empty<int>();
+            protected override void EnsureDerivedMatchCapacity(int capacity) {
+                if (_c1.Length < capacity) _c1 = new int[capacity];
+                if (_c2.Length < capacity) _c2 = new int[capacity];
+                if (_c3.Length < capacity) _c3 = new int[capacity];
+                if (_c4.Length < capacity) _c4 = new int[capacity];
+                if (_c5.Length < capacity) _c5 = new int[capacity];
+            }
             protected override void PrepareMatches(System.Collections.Generic.List<Archetype> matches) { var capacity = matches.Count;
-                if (_c1.Length < capacity) _c1 = new int[Math.Max(capacity, _c1.Length == 0 ? 4 : _c1.Length * 2)];
-                if (_c2.Length < capacity) _c2 = new int[Math.Max(capacity, _c2.Length == 0 ? 4 : _c2.Length * 2)];
-                if (_c3.Length < capacity) _c3 = new int[Math.Max(capacity, _c3.Length == 0 ? 4 : _c3.Length * 2)];
-                if (_c4.Length < capacity) _c4 = new int[Math.Max(capacity, _c4.Length == 0 ? 4 : _c4.Length * 2)];
-                if (_c5.Length < capacity) _c5 = new int[Math.Max(capacity, _c5.Length == 0 ? 4 : _c5.Length * 2)];
+                EnsureDerivedMatchCapacity(capacity);
                 for (var n = 0; n < capacity; n++) { var archetype = matches[n];
                     _c1[n] = archetype.GetColumnIndex(ComponentType<T1>.Id);
                     _c2[n] = archetype.GetColumnIndex(ComponentType<T2>.Id);
@@ -520,6 +535,7 @@ namespace LitheEcs
         public int BatchSize { get; }
         internal ParallelQuery(Query<T1, T2, T3, T4, T5> source, int minimumEntityCount, int batchSize)
         { if (minimumEntityCount < 1) throw new ArgumentOutOfRangeException(nameof(minimumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _source = source; MinimumEntityCount = minimumEntityCount; BatchSize = batchSize; }
+        /// <summary>Preallocates work ranges and current matching-archetype metadata.</summary>
         public void Reserve(int maximumEntityCount) => _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
         public void Run(ParallelRangeAction<T1, T2, T3, T4, T5> action) => _source.ParallelForRanges(action, MinimumEntityCount, BatchSize);
     }
@@ -576,7 +592,7 @@ namespace LitheEcs
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
           var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
-          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); }
+          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); job.EnsureMatchCapacity(_plan.Matches.Count); }
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3, T4, T5, T6> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
@@ -592,13 +608,16 @@ namespace LitheEcs
             private int[] _c4 = Array.Empty<int>();
             private int[] _c5 = Array.Empty<int>();
             private int[] _c6 = Array.Empty<int>();
+            protected override void EnsureDerivedMatchCapacity(int capacity) {
+                if (_c1.Length < capacity) _c1 = new int[capacity];
+                if (_c2.Length < capacity) _c2 = new int[capacity];
+                if (_c3.Length < capacity) _c3 = new int[capacity];
+                if (_c4.Length < capacity) _c4 = new int[capacity];
+                if (_c5.Length < capacity) _c5 = new int[capacity];
+                if (_c6.Length < capacity) _c6 = new int[capacity];
+            }
             protected override void PrepareMatches(System.Collections.Generic.List<Archetype> matches) { var capacity = matches.Count;
-                if (_c1.Length < capacity) _c1 = new int[Math.Max(capacity, _c1.Length == 0 ? 4 : _c1.Length * 2)];
-                if (_c2.Length < capacity) _c2 = new int[Math.Max(capacity, _c2.Length == 0 ? 4 : _c2.Length * 2)];
-                if (_c3.Length < capacity) _c3 = new int[Math.Max(capacity, _c3.Length == 0 ? 4 : _c3.Length * 2)];
-                if (_c4.Length < capacity) _c4 = new int[Math.Max(capacity, _c4.Length == 0 ? 4 : _c4.Length * 2)];
-                if (_c5.Length < capacity) _c5 = new int[Math.Max(capacity, _c5.Length == 0 ? 4 : _c5.Length * 2)];
-                if (_c6.Length < capacity) _c6 = new int[Math.Max(capacity, _c6.Length == 0 ? 4 : _c6.Length * 2)];
+                EnsureDerivedMatchCapacity(capacity);
                 for (var n = 0; n < capacity; n++) { var archetype = matches[n];
                     _c1[n] = archetype.GetColumnIndex(ComponentType<T1>.Id);
                     _c2[n] = archetype.GetColumnIndex(ComponentType<T2>.Id);
@@ -679,6 +698,7 @@ namespace LitheEcs
         public int BatchSize { get; }
         internal ParallelQuery(Query<T1, T2, T3, T4, T5, T6> source, int minimumEntityCount, int batchSize)
         { if (minimumEntityCount < 1) throw new ArgumentOutOfRangeException(nameof(minimumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _source = source; MinimumEntityCount = minimumEntityCount; BatchSize = batchSize; }
+        /// <summary>Preallocates work ranges and current matching-archetype metadata.</summary>
         public void Reserve(int maximumEntityCount) => _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
         public void Run(ParallelRangeAction<T1, T2, T3, T4, T5, T6> action) => _source.ParallelForRanges(action, MinimumEntityCount, BatchSize);
     }
@@ -737,7 +757,7 @@ namespace LitheEcs
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
           var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
-          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); }
+          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); job.EnsureMatchCapacity(_plan.Matches.Count); }
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3, T4, T5, T6, T7> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
@@ -754,14 +774,17 @@ namespace LitheEcs
             private int[] _c5 = Array.Empty<int>();
             private int[] _c6 = Array.Empty<int>();
             private int[] _c7 = Array.Empty<int>();
+            protected override void EnsureDerivedMatchCapacity(int capacity) {
+                if (_c1.Length < capacity) _c1 = new int[capacity];
+                if (_c2.Length < capacity) _c2 = new int[capacity];
+                if (_c3.Length < capacity) _c3 = new int[capacity];
+                if (_c4.Length < capacity) _c4 = new int[capacity];
+                if (_c5.Length < capacity) _c5 = new int[capacity];
+                if (_c6.Length < capacity) _c6 = new int[capacity];
+                if (_c7.Length < capacity) _c7 = new int[capacity];
+            }
             protected override void PrepareMatches(System.Collections.Generic.List<Archetype> matches) { var capacity = matches.Count;
-                if (_c1.Length < capacity) _c1 = new int[Math.Max(capacity, _c1.Length == 0 ? 4 : _c1.Length * 2)];
-                if (_c2.Length < capacity) _c2 = new int[Math.Max(capacity, _c2.Length == 0 ? 4 : _c2.Length * 2)];
-                if (_c3.Length < capacity) _c3 = new int[Math.Max(capacity, _c3.Length == 0 ? 4 : _c3.Length * 2)];
-                if (_c4.Length < capacity) _c4 = new int[Math.Max(capacity, _c4.Length == 0 ? 4 : _c4.Length * 2)];
-                if (_c5.Length < capacity) _c5 = new int[Math.Max(capacity, _c5.Length == 0 ? 4 : _c5.Length * 2)];
-                if (_c6.Length < capacity) _c6 = new int[Math.Max(capacity, _c6.Length == 0 ? 4 : _c6.Length * 2)];
-                if (_c7.Length < capacity) _c7 = new int[Math.Max(capacity, _c7.Length == 0 ? 4 : _c7.Length * 2)];
+                EnsureDerivedMatchCapacity(capacity);
                 for (var n = 0; n < capacity; n++) { var archetype = matches[n];
                     _c1[n] = archetype.GetColumnIndex(ComponentType<T1>.Id);
                     _c2[n] = archetype.GetColumnIndex(ComponentType<T2>.Id);
@@ -850,6 +873,7 @@ namespace LitheEcs
         public int BatchSize { get; }
         internal ParallelQuery(Query<T1, T2, T3, T4, T5, T6, T7> source, int minimumEntityCount, int batchSize)
         { if (minimumEntityCount < 1) throw new ArgumentOutOfRangeException(nameof(minimumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _source = source; MinimumEntityCount = minimumEntityCount; BatchSize = batchSize; }
+        /// <summary>Preallocates work ranges and current matching-archetype metadata.</summary>
         public void Reserve(int maximumEntityCount) => _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
         public void Run(ParallelRangeAction<T1, T2, T3, T4, T5, T6, T7> action) => _source.ParallelForRanges(action, MinimumEntityCount, BatchSize);
     }
@@ -910,7 +934,7 @@ namespace LitheEcs
         internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)
         { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();
           var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
-          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); }
+          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); job.EnsureMatchCapacity(_plan.Matches.Count); }
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3, T4, T5, T6, T7, T8> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
@@ -928,15 +952,18 @@ namespace LitheEcs
             private int[] _c6 = Array.Empty<int>();
             private int[] _c7 = Array.Empty<int>();
             private int[] _c8 = Array.Empty<int>();
+            protected override void EnsureDerivedMatchCapacity(int capacity) {
+                if (_c1.Length < capacity) _c1 = new int[capacity];
+                if (_c2.Length < capacity) _c2 = new int[capacity];
+                if (_c3.Length < capacity) _c3 = new int[capacity];
+                if (_c4.Length < capacity) _c4 = new int[capacity];
+                if (_c5.Length < capacity) _c5 = new int[capacity];
+                if (_c6.Length < capacity) _c6 = new int[capacity];
+                if (_c7.Length < capacity) _c7 = new int[capacity];
+                if (_c8.Length < capacity) _c8 = new int[capacity];
+            }
             protected override void PrepareMatches(System.Collections.Generic.List<Archetype> matches) { var capacity = matches.Count;
-                if (_c1.Length < capacity) _c1 = new int[Math.Max(capacity, _c1.Length == 0 ? 4 : _c1.Length * 2)];
-                if (_c2.Length < capacity) _c2 = new int[Math.Max(capacity, _c2.Length == 0 ? 4 : _c2.Length * 2)];
-                if (_c3.Length < capacity) _c3 = new int[Math.Max(capacity, _c3.Length == 0 ? 4 : _c3.Length * 2)];
-                if (_c4.Length < capacity) _c4 = new int[Math.Max(capacity, _c4.Length == 0 ? 4 : _c4.Length * 2)];
-                if (_c5.Length < capacity) _c5 = new int[Math.Max(capacity, _c5.Length == 0 ? 4 : _c5.Length * 2)];
-                if (_c6.Length < capacity) _c6 = new int[Math.Max(capacity, _c6.Length == 0 ? 4 : _c6.Length * 2)];
-                if (_c7.Length < capacity) _c7 = new int[Math.Max(capacity, _c7.Length == 0 ? 4 : _c7.Length * 2)];
-                if (_c8.Length < capacity) _c8 = new int[Math.Max(capacity, _c8.Length == 0 ? 4 : _c8.Length * 2)];
+                EnsureDerivedMatchCapacity(capacity);
                 for (var n = 0; n < capacity; n++) { var archetype = matches[n];
                     _c1[n] = archetype.GetColumnIndex(ComponentType<T1>.Id);
                     _c2[n] = archetype.GetColumnIndex(ComponentType<T2>.Id);
@@ -1033,6 +1060,7 @@ namespace LitheEcs
         public int BatchSize { get; }
         internal ParallelQuery(Query<T1, T2, T3, T4, T5, T6, T7, T8> source, int minimumEntityCount, int batchSize)
         { if (minimumEntityCount < 1) throw new ArgumentOutOfRangeException(nameof(minimumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _source = source; MinimumEntityCount = minimumEntityCount; BatchSize = batchSize; }
+        /// <summary>Preallocates work ranges and current matching-archetype metadata.</summary>
         public void Reserve(int maximumEntityCount) => _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
         public void Run(ParallelRangeAction<T1, T2, T3, T4, T5, T6, T7, T8> action) => _source.ParallelForRanges(action, MinimumEntityCount, BatchSize);
     }

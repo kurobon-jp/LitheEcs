@@ -3193,6 +3193,40 @@ namespace LitheEcs.Tests
         }
 
         [Test]
+        public void ParallelQuery_Reserve_ShouldPreventFirstRunMetadataAllocations()
+        {
+            for (var i = 0; i < 64; i++)
+            {
+                var entity = _world.Spawn();
+                entity.Add(new Position(), new Velocity(), new Acceleration(), new Health());
+                entity.Add<Player>();
+                entity.Add<Disabled>();
+                entity.Add<Grounded>();
+                entity.Add<Flying>();
+            }
+
+            _world.WarmParallelQueryWorkers();
+            var one = _world.Query<Position>().AsParallelQuery(1, 8);
+            var eight = _world.Query<Position, Velocity, Acceleration, Health, Player, Disabled, Grounded, Flying>()
+                .AsParallelQuery(1, 8);
+            ParallelRangeAction<Position> oneAction = static (_, _) => { };
+            ParallelRangeAction<Position, Velocity, Acceleration, Health, Player, Disabled, Grounded, Flying>
+                eightAction = static (_, _, _, _, _, _, _, _, _) => { };
+            one.Reserve(64);
+            eight.Reserve(64);
+
+            var beforeOne = GC.GetAllocatedBytesForCurrentThread();
+            one.Run(oneAction);
+            var oneAllocated = GC.GetAllocatedBytesForCurrentThread() - beforeOne;
+            var beforeEight = GC.GetAllocatedBytesForCurrentThread();
+            eight.Run(eightAction);
+            var eightAllocated = GC.GetAllocatedBytesForCurrentThread() - beforeEight;
+
+            Assert.That(oneAllocated, Is.EqualTo(0));
+            Assert.That(eightAllocated, Is.EqualTo(0));
+        }
+
+        [Test]
         public void ParallelQuery_ShouldKeepExecutionSettingsAndSupportMinimumAndMaximumArities()
         {
             var entity = _world.Spawn();

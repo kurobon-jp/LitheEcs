@@ -68,6 +68,7 @@ public sealed class QueryGenerator : ISourceGenerator
         source.Append("        internal ParallelQuery(Query<").Append(types)
             .AppendLine("> source, int minimumEntityCount, int batchSize)");
         source.AppendLine("        { if (minimumEntityCount < 1) throw new ArgumentOutOfRangeException(nameof(minimumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _source = source; MinimumEntityCount = minimumEntityCount; BatchSize = batchSize; }");
+        source.AppendLine("        /// <summary>Preallocates work ranges and current matching-archetype metadata.</summary>");
         source.AppendLine("        public void Reserve(int maximumEntityCount) => _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);");
         source.Append("        public void Run(ParallelRangeAction<").Append(types)
             .AppendLine("> action) => _source.ParallelForRanges(action, MinimumEntityCount, BatchSize);");
@@ -160,7 +161,7 @@ public sealed class QueryGenerator : ISourceGenerator
         source.AppendLine("        internal void ReserveParallelRangesCore(int maximumEntityCount, int batchSize)");
         source.AppendLine("        { _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); if (maximumEntityCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntityCount)); if (batchSize < 1) throw new ArgumentOutOfRangeException(nameof(batchSize)); _plan.Ensure();");
         source.AppendLine("          var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();");
-        source.AppendLine("          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); }");
+        source.AppendLine("          job.EnsureItemCapacity(World.GetParallelRangeReservationCount(maximumEntityCount, _plan.Matches.Count, batchSize)); job.EnsureMatchCapacity(_plan.Matches.Count); }");
     }
 
     private static void AppendArchetypeJobRangeLease(StringBuilder source, int arity, string types)
@@ -211,9 +212,12 @@ public sealed class QueryGenerator : ISourceGenerator
         source.AppendLine("        { internal World World = null!;");
         source.Append("            internal ParallelRangeAction<").Append(types).AppendLine("> Action = null!;");
         for (var i = 1; i <= arity; i++) source.Append("            private int[] _c").Append(i).AppendLine(" = Array.Empty<int>();");
-        source.AppendLine("            protected override void PrepareMatches(System.Collections.Generic.List<Archetype> matches) { var capacity = matches.Count;");
+        source.AppendLine("            protected override void EnsureDerivedMatchCapacity(int capacity) {");
         for (var i = 1; i <= arity; i++)
-            source.Append("                if (_c").Append(i).Append(".Length < capacity) _c").Append(i).AppendLine(" = new int[Math.Max(capacity, _c" + i + ".Length == 0 ? 4 : _c" + i + ".Length * 2)];");
+            source.Append("                if (_c").Append(i).Append(".Length < capacity) _c").Append(i).AppendLine(" = new int[capacity];");
+        source.AppendLine("            }");
+        source.AppendLine("            protected override void PrepareMatches(System.Collections.Generic.List<Archetype> matches) { var capacity = matches.Count;");
+        source.AppendLine("                EnsureDerivedMatchCapacity(capacity);");
         source.AppendLine("                for (var n = 0; n < capacity; n++) { var archetype = matches[n];");
         for (var i = 1; i <= arity; i++)
             source.Append("                    _c").Append(i).Append("[n] = archetype.GetColumnIndex(ComponentType<T").Append(i).AppendLine(">.Id);");

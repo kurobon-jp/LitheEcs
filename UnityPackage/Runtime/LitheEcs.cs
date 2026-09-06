@@ -55,6 +55,14 @@ namespace LitheEcs
             if (_items.Length < capacity) _items = new ParallelQueryWorkItem[capacity];
         }
 
+        internal void EnsureMatchCapacity(int capacity)
+        {
+            if (capacity < 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+            if (_cachedContentVersions.Length < capacity)
+                _cachedContentVersions = new int[capacity];
+            EnsureDerivedMatchCapacity(capacity);
+        }
+
         internal int Prepare(List<Archetype> matches, int batchSize)
         {
             if (_cachedBatchSize == batchSize && _cachedMatchCount == matches.Count)
@@ -152,6 +160,7 @@ namespace LitheEcs
             }
         }
 
+        protected virtual void EnsureDerivedMatchCapacity(int capacity) { }
         protected virtual void PrepareMatches(List<Archetype> matches) { }
         protected abstract void Execute(in ParallelQueryWorkItem item);
     }
@@ -1249,6 +1258,7 @@ namespace LitheEcs
             BatchSize = batchSize;
         }
 
+        /// <summary>Preallocates work ranges and current matching-archetype metadata.</summary>
         public void Reserve(int maximumEntityCount) =>
             _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
 
@@ -6005,6 +6015,7 @@ namespace LitheEcs
             if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
             job.EnsureItemCapacity(World.GetParallelRangeReservationCount(
                 maximumEntityCount, _plan.Matches.Count, batchSize));
+            job.EnsureMatchCapacity(_plan.Matches.Count);
         }
 
         internal void ParallelForRanges(ParallelRangeAction<T1> action, int minimumEntityCount, int batchSize)
@@ -6054,11 +6065,14 @@ namespace LitheEcs
             internal ParallelRangeAction<T1> Action = null!;
             private int[] _columnIndices = Array.Empty<int>();
 
+            protected override void EnsureDerivedMatchCapacity(int capacity)
+            {
+                if (_columnIndices.Length < capacity) _columnIndices = new int[capacity];
+            }
+
             protected override void PrepareMatches(List<Archetype> matches)
             {
-                if (_columnIndices.Length < matches.Count)
-                    _columnIndices = new int[Math.Max(matches.Count,
-                        _columnIndices.Length == 0 ? 4 : _columnIndices.Length * 2)];
+                EnsureDerivedMatchCapacity(matches.Count);
                 for (var i = 0; i < matches.Count; i++)
                     _columnIndices[i] = matches[i].GetColumnIndex(ComponentType<T1>.Id);
             }
