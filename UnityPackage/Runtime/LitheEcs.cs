@@ -4321,6 +4321,11 @@ namespace LitheEcs
             }
             var typeId = ComponentType<T>.Id;
             var location = _locations[entity.Index];
+            if (CanMutateComponentsFast() && !SingletonType<T>.IsSingleton)
+            {
+                AddComponentFast(entity, component, typeId, location);
+                return;
+            }
             var isNew = !location.IsValid || !location.Archetype.Has(typeId);
             if (isNew) ThrowIfParallelQueryActive();
             EnsureComponentTypeCapacity(typeId);
@@ -4343,6 +4348,23 @@ namespace LitheEcs
                 _singletonTypeMask.Set(typeId);
             }
             PublishComponentEvent(typeId, entity, isNew ? ComponentEvent.KeyAdded : ComponentEvent.KeyChanged);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void AddComponentFast<T>(in Entity entity, in T component, int typeId,
+            in EntityLocation location) where T : struct
+        {
+            var source = location.IsValid ? location.Archetype : _archetypes.Empty;
+            if (!source.Has(typeId))
+            {
+                ThrowIfParallelQueryActive();
+                EnsureComponentTypeCapacity(typeId);
+                MoveEntityToSingleComponent(entity, _archetypes.With(source, typeId));
+                StructuralVersion++;
+                _componentVersions[typeId]++;
+            }
+            var target = _locations[entity.Index];
+            target.Archetype.Get<T>(target) = component;
         }
 
         public void AddComponents<T1, T2>(Entity entity, T1 component1, T2 component2)
@@ -4731,6 +4753,9 @@ namespace LitheEcs
             if (!location.IsValid || !location.Archetype.Has(typeId)) return false;
             ThrowIfParallelQueryActive();
 
+            if (CanMutateComponentsFast() && !SingletonType<T>.IsSingleton)
+                return RemoveComponentFast(entity, location, typeId);
+
             MoveEntityTo(entity, _archetypes.Without(location.Archetype, typeId));
             _componentVersions[typeId]++;
             if (SingletonType<T>.IsSingleton && _singletonEntities != null && _singletonEntities[typeId] == entity)
@@ -4738,6 +4763,22 @@ namespace LitheEcs
             StructuralVersion++;
             NotifyFilterComponentChanged(typeId, entity.Index);
             PublishComponentEvent(typeId, entity, ComponentEvent.KeyRemoved);
+            return true;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool RemoveComponentFast(in Entity entity, in EntityLocation location, int typeId)
+        {
+            var destination = _archetypes.Without(location.Archetype, typeId);
+            if (destination.TypeIds.Length == 0)
+            {
+                var movedIndex = location.Archetype.RemoveAt(location);
+                _locations[entity.Index] = default;
+                if (movedIndex >= 0) _locations[movedIndex] = new EntityLocation(location.Chunk, location.Row);
+            }
+            else MoveEntityToSingleComponent(entity, destination);
+            _componentVersions[typeId]++;
+            StructuralVersion++;
             return true;
         }
 
@@ -5154,6 +5195,7 @@ namespace LitheEcs
             _relationBackwardMasks = new ComponentMask[_versions.Length];
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void MoveEntityTo(in Entity entity, Archetype destination)
         {
             var sourceLocation = _locations[entity.Index];
@@ -5183,6 +5225,31 @@ namespace LitheEcs
             _locations[entity.Index] = targetLocation;
             if (movedIndex >= 0)
                 _locations[movedIndex] = new EntityLocation(sourceLocation.Chunk, sourceLocation.Row);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void MoveEntityToSingleComponent(in Entity entity, Archetype destination)
+        {
+            var sourceLocation = _locations[entity.Index];
+            if (sourceLocation.IsValid && ReferenceEquals(sourceLocation.Archetype, destination)) return;
+            if (destination.TypeIds.Length == 0)
+            {
+                if (!sourceLocation.IsValid) return;
+                var moved = sourceLocation.Archetype.RemoveAt(sourceLocation);
+                _locations[entity.Index] = default;
+                if (moved >= 0) _locations[moved] = new EntityLocation(sourceLocation.Chunk, sourceLocation.Row);
+                return;
+            }
+            if (!sourceLocation.IsValid)
+            {
+                _locations[entity.Index] = destination.Add(entity.Index);
+                return;
+            }
+            var target = destination.Add(entity.Index);
+            sourceLocation.Archetype.CopySharedComponents(sourceLocation, destination, target);
+            var movedIndex = sourceLocation.Archetype.RemoveAt(sourceLocation);
+            _locations[entity.Index] = target;
+            if (movedIndex >= 0) _locations[movedIndex] = new EntityLocation(sourceLocation.Chunk, sourceLocation.Row);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
