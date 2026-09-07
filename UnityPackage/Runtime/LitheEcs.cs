@@ -2619,18 +2619,20 @@ namespace LitheEcs
     public readonly struct EntityDiagnostics
     {
         internal EntityDiagnostics(in Entity entity, int componentStartIndex, int componentCount,
-            int componentMaskHash)
+            int componentMaskHash, int archetypeIndex)
         {
             Entity = entity;
             ComponentStartIndex = componentStartIndex;
             ComponentCount = componentCount;
             ComponentMaskHash = componentMaskHash;
+            ArchetypeIndex = archetypeIndex;
         }
 
         public Entity Entity { get; }
         internal int ComponentStartIndex { get; }
         public int ComponentCount { get; }
         public int ComponentMaskHash { get; }
+        public int ArchetypeIndex { get; }
 
         public override string ToString() =>
             $"Entity {Entity.Index}:{Entity.Version} {{ Components: {ComponentCount}, MaskHash: {ComponentMaskHash:X8} }}";
@@ -5413,7 +5415,8 @@ namespace LitheEcs
                         GetEntity(entityIndex),
                         componentStart,
                         componentDestination - componentStart,
-                        GetComponentTypeHash(typeIds));
+                        GetComponentTypeHash(typeIds),
+                        location.IsValid ? location.Archetype.Index : -1);
                 }
 
                 var componentTypesById = new Type?[ComponentTypeRegistry.Count];

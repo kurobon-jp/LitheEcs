@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using UnityEditor;
@@ -11,7 +12,8 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
     internal sealed class EntitiesHierarchyWindow : EditorWindow
     {
         private TreeView _treeView;
-        private IList<TreeViewItemData<EntityDiagnostics>> _rootItems;
+        private IList<TreeViewItemData<object>> _rootItems;
+        private readonly Dictionary<int, ArchetypeGroup> _groups = new();
         private List<int> _selectionIds;
         private World _snapshotWorld;
         private int _snapshotStructuralVersion = -1;
@@ -60,8 +62,10 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
             };
             _treeView.bindItem = (e, i) =>
             {
-                var entity = _treeView.GetItemDataForIndex<EntityDiagnostics>(i);
-                e.Q<Label>().text = FormatEntity(entity);
+                var item = _treeView.GetItemDataForIndex<object>(i);
+                e.Q<Label>().text = item is ArchetypeGroup group
+                    ? $"{group.Label} ({group.Entities.Count})"
+                    : FormatEntity((EntityDiagnostics)item);
             };
             _treeView.selectionChanged += OnSelectionChanged;
 
@@ -191,7 +195,7 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
             if (EntityVisualizer.Worlds.Count == 0 || !EditorApplication.isPlaying ||
                 _treeView == null || _selectedWorld == null) return;
 
-            _rootItems ??= new List<TreeViewItemData<EntityDiagnostics>>();
+            _rootItems ??= new List<TreeViewItemData<object>>();
 
             var structuralVersion = _selectedWorld.StructuralVersion;
             if (_snapshot == null || !ReferenceEquals(_snapshotWorld, _selectedWorld) ||
@@ -211,12 +215,28 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
             var searchText = _searchText?.Trim();
             var selectedEntity = SelectedEntity.Entity;
             var selectedItemId = -1;
+            _groups.Clear();
             foreach (var entity in _snapshot.Entities)
             {
                 if (!MatchesSearch(entity, searchText)) continue;
-                var itemId = entity.Entity.Index;
-                _rootItems.Add(new TreeViewItemData<EntityDiagnostics>(itemId, entity));
-                if (entity.Entity == selectedEntity) selectedItemId = itemId;
+                if (!_groups.TryGetValue(entity.ArchetypeIndex, out var group))
+                {
+                    group = new ArchetypeGroup(entity.ArchetypeIndex, FormatArchetype(entity));
+                    _groups.Add(entity.ArchetypeIndex, group);
+                }
+                group.Entities.Add(entity);
+            }
+
+            foreach (var group in _groups.Values)
+            {
+                var children = new List<TreeViewItemData<object>>(group.Entities.Count);
+                foreach (var entity in group.Entities)
+                {
+                    var itemId = entity.Entity.Index;
+                    children.Add(new TreeViewItemData<object>(itemId, entity));
+                    if (entity.Entity == selectedEntity) selectedItemId = itemId;
+                }
+                _rootItems.Add(new TreeViewItemData<object>(group.TreeId, group, children));
             }
 
             _treeView.SetRootItems(_rootItems);
@@ -263,6 +283,55 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
         {
             _selectedWorld = world;
             _filterDirty = true;
+        }
+
+        private string FormatArchetype(in EntityDiagnostics entity)
+        {
+            if (entity.ArchetypeIndex < 0) return "Archetype: <Empty>";
+            var typeIds = _snapshot.GetComponentTypeIds(entity);
+            _entityTextBuilder.Clear();
+            _entityTextBuilder.Append("Archetype: ");
+            for (var i = 0; i < typeIds.Length; i++)
+            {
+                if (i != 0) _entityTextBuilder.Append(", ");
+                AppendTypeName(_entityTextBuilder, _snapshot.GetComponentType(typeIds[i]));
+            }
+            return _entityTextBuilder.ToString();
+        }
+
+        private static void AppendTypeName(StringBuilder builder, Type type)
+        {
+            if (!type.IsGenericType)
+            {
+                builder.Append(type.Name);
+                return;
+            }
+
+            var name = type.Name;
+            var arityStart = name.IndexOf('`');
+            builder.Append(arityStart >= 0 ? name.Substring(0, arityStart) : name);
+            builder.Append('<');
+            var arguments = type.GetGenericArguments();
+            for (var i = 0; i < arguments.Length; i++)
+            {
+                if (i != 0) builder.Append(", ");
+                AppendTypeName(builder, arguments[i]);
+            }
+            builder.Append('>');
+        }
+
+        private sealed class ArchetypeGroup
+        {
+            internal readonly int TreeId;
+            internal readonly string Label;
+            internal readonly List<EntityDiagnostics> Entities = new();
+
+            internal ArchetypeGroup(int archetypeIndex, string label)
+            {
+                // Keep group IDs disjoint from non-negative Entity indices.
+                TreeId = int.MinValue + archetypeIndex + 1;
+                Label = label;
+            }
         }
 
         [MenuItem("Window/LitheEcs/Entities Hierarchy")]
