@@ -3533,6 +3533,20 @@ namespace LitheEcs.Tests
         }
 
         [Test]
+        public void ReserveArchetypeAlias_ShouldBeCapturedByEntityDiagnosticsSnapshot()
+        {
+            _world.ReserveArchetype(1, static archetype => archetype
+                .Alias("Agents")
+                .Add<Position>());
+
+            var entity = _world.Spawn();
+            entity.Add(new Position());
+            var snapshot = _world.CreateEntityDiagnosticsSnapshot();
+
+            Assert.That(snapshot.Entities[0].ArchetypeAlias, Is.EqualTo("Agents"));
+        }
+
+        [Test]
         public void CreateEntityDiagnosticsSnapshot_ShouldRemainIndependentFromComponentChanges()
         {
             var entity = _world.Spawn();

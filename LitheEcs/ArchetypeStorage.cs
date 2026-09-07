@@ -291,6 +291,7 @@ namespace LitheEcs
         private readonly int _index;
         internal int Index => _index;
         internal readonly int[] TypeIds;
+        internal string? Alias;
         internal readonly List<ArchetypeChunk> Chunks;
         internal int EntityCount;
         internal int ContentVersion;

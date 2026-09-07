@@ -14,6 +14,7 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
         private TreeView _treeView;
         private IList<TreeViewItemData<object>> _rootItems;
         private readonly Dictionary<int, ArchetypeGroup> _groups = new();
+        private readonly List<ArchetypeGroup> _orderedGroups = new();
         private List<int> _selectionIds;
         private World _snapshotWorld;
         private int _snapshotStructuralVersion = -1;
@@ -65,7 +66,7 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
                 var item = _treeView.GetItemDataForIndex<object>(i);
                 e.Q<Label>().text = item is ArchetypeGroup group
                     ? $"{group.Label} ({group.Entities.Count})"
-                    : FormatEntity((EntityDiagnostics)item);
+                    : FormatEntityId((EntityDiagnostics)item);
             };
             _treeView.selectionChanged += OnSelectionChanged;
 
@@ -153,13 +154,8 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
             EditorUtility.SetDirty(this);
         }
 
-        private string FormatEntity(in EntityDiagnostics entity)
-        {
-            if (_snapshot == null) return entity.ToString();
-            _entityTextBuilder.Clear();
-            _snapshot.AppendFormattedEntity(_entityTextBuilder, entity);
-            return _entityTextBuilder.ToString();
-        }
+        private static string FormatEntityId(in EntityDiagnostics entity) =>
+            $"Entity: {entity.Entity.Index}";
 
         private bool MatchesSearch(in EntityDiagnostics entity, string searchText)
         {
@@ -227,7 +223,11 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
                 group.Entities.Add(entity);
             }
 
-            foreach (var group in _groups.Values)
+            _orderedGroups.Clear();
+            _orderedGroups.AddRange(_groups.Values);
+            _orderedGroups.Sort(static (left, right) =>
+                left.ArchetypeIndex.CompareTo(right.ArchetypeIndex));
+            foreach (var group in _orderedGroups)
             {
                 var children = new List<TreeViewItemData<object>>(group.Entities.Count);
                 foreach (var entity in group.Entities)
@@ -288,6 +288,7 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
         private string FormatArchetype(in EntityDiagnostics entity)
         {
             if (entity.ArchetypeIndex < 0) return "Archetype: <Empty>";
+            if (!string.IsNullOrEmpty(entity.ArchetypeAlias)) return entity.ArchetypeAlias;
             var typeIds = _snapshot.GetComponentTypeIds(entity);
             _entityTextBuilder.Clear();
             _entityTextBuilder.Append("Archetype: ");
@@ -322,12 +323,14 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
 
         private sealed class ArchetypeGroup
         {
+            internal readonly int ArchetypeIndex;
             internal readonly int TreeId;
             internal readonly string Label;
             internal readonly List<EntityDiagnostics> Entities = new();
 
             internal ArchetypeGroup(int archetypeIndex, string label)
             {
+                ArchetypeIndex = archetypeIndex;
                 // Keep group IDs disjoint from non-negative Entity indices.
                 TreeId = int.MinValue + archetypeIndex + 1;
                 Label = label;
