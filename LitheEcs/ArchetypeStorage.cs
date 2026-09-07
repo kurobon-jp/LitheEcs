@@ -293,6 +293,7 @@ namespace LitheEcs
         internal readonly int[] TypeIds;
         internal readonly List<ArchetypeChunk> Chunks;
         internal int EntityCount;
+        internal int ContentVersion;
         private int _reservedChunkCount;
 
         private readonly struct ColumnCopy
@@ -394,6 +395,7 @@ namespace LitheEcs
             chunk.EntityIds[row] = entityIndex;
             chunk.Count = row + 1;
             EntityCount++;
+            ContentVersion++;
             return new EntityLocation(chunk, row);
         }
 
@@ -471,6 +473,10 @@ namespace LitheEcs
             return ((ArchetypeColumn<T>)chunk.Columns[columnIndex]).Values;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal T[] GetColumn<T>(ArchetypeChunk chunk, int columnIndex) where T : struct =>
+            ((ArchetypeColumn<T>)chunk.Columns[columnIndex]).Values;
+
         internal void CopySharedComponents(in EntityLocation source, Archetype destination,
             in EntityLocation target)
         {
@@ -526,6 +532,7 @@ namespace LitheEcs
                 lastChunk.Columns[_clearColumnIndices[i]].Clear(lastRow);
             lastChunk.Count = lastRow;
             EntityCount--;
+            ContentVersion++;
             if (lastChunk.Count == 0 && lastChunkIndex >= _reservedChunkCount) ReturnLastChunk(lastChunk);
             return movedIndex;
         }
@@ -539,6 +546,7 @@ namespace LitheEcs
 
         internal void ClearAll()
         {
+            if (EntityCount != 0) ContentVersion++;
             for (var chunkIndex = Chunks.Count - 1; chunkIndex >= 0; chunkIndex--)
             {
                 var chunk = Chunks[chunkIndex];

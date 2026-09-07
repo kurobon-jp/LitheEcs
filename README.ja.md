@@ -135,7 +135,7 @@ world.Query<Position, Velocity>()
     });
 ```
 
-callbackには、対応するComponentの`Span<T>`と`EntityRange`が渡されます。対象Entity数が`minimumEntityCount`未満の場合は、同じcallbackを呼び出し元のthreadで逐次実行します。`minimumEntityCount`と`batchSize`の既定値はいずれも4,096です。
+callbackには、対応するComponentの`Span<T>`と`EntityRange`が渡されます。対象Entity数が`minimumEntityCount`未満の場合は、同じcallbackを呼び出し元のthreadで逐次実行します。`minimumEntityCount`と`batchSize`の既定値はいずれも4,096です。workerは一度に最大`batchSize`件を取得しますが、callbackへ渡すSpanはstorage page内に収まります。呼び出し元threadも処理に参加します。32,768 Entity未満は呼び出し元threadのみを使い、それ以上では約8,192 Entityごとに1 threadを有効化します（論理processor数が上限です）。
 
 各callbackは自身のRange内にあるComponentを更新できますが、捕捉した共有状態へのアクセスは利用者側で同期してください。Parallel Queryの同時実行・ネストや、実行中の構造変更はできません。現在の`EntityCommandBuffer`は所有thread専用なので、構造変更要求を安全に収集し、`Run()`完了後に記録してください。このAPIはManaged thread用であり、Unity Job SystemやBurst用ではありません。
 

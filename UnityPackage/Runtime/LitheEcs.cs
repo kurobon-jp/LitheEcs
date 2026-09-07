@@ -23,13 +23,15 @@ namespace LitheEcs
         internal readonly int Start;
         internal readonly int End;
         internal readonly int QueryOffset;
+        internal readonly int MatchIndex;
 
-        internal ParallelQueryWorkItem(ArchetypeChunk chunk, int start, int end, int queryOffset)
+        internal ParallelQueryWorkItem(ArchetypeChunk chunk, int start, int end, int queryOffset, int matchIndex)
         {
             Chunk = chunk;
             Start = start;
             End = end;
             QueryOffset = queryOffset;
+            MatchIndex = matchIndex;
         }
     }
 
@@ -38,14 +40,47 @@ namespace LitheEcs
         private ParallelQueryWorkItem[] _items = Array.Empty<ParallelQueryWorkItem>();
         private int _count;
         private int _next;
+        private int _itemsPerClaim;
+        private int[] _cachedContentVersions = Array.Empty<int>();
+        private int _cachedMatchCount = -1;
+        private int _cachedBatchSize;
+        private int _cachedEntityCount;
+
+        internal int ClaimCount => _count == 0 ? 0 : (_count - 1) / _itemsPerClaim + 1;
+        internal int EntityCount => _cachedEntityCount;
 
         internal void EnsureItemCapacity(int capacity)
         {
             if (_items.Length < capacity) _items = new ParallelQueryWorkItem[capacity];
         }
 
+        internal void EnsureMatchCapacity(int capacity)
+        {
+            if (capacity < 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+            if (_cachedContentVersions.Length < capacity)
+                _cachedContentVersions = new int[capacity];
+            EnsureDerivedMatchCapacity(capacity);
+        }
+
         internal int Prepare(List<Archetype> matches, int batchSize)
         {
+            if (_cachedBatchSize == batchSize && _cachedMatchCount == matches.Count)
+            {
+                var cacheValid = true;
+                for (var i = 0; i < matches.Count; i++)
+                {
+                    if (_cachedContentVersions[i] == matches[i].ContentVersion) continue;
+                    cacheValid = false;
+                    break;
+                }
+
+                if (cacheValid)
+                {
+                    _next = 0;
+                    return _cachedEntityCount;
+                }
+            }
+
             var itemCount = 0;
             var entityCount = 0;
             for (var i = 0; i < matches.Count; i++)
@@ -64,6 +99,7 @@ namespace LitheEcs
 
             var destination = 0;
             var queryOffset = 0;
+            PrepareMatches(matches);
             for (var i = 0; i < matches.Count; i++)
             {
                 var archetype = matches[i];
@@ -72,26 +108,59 @@ namespace LitheEcs
                     var chunk = archetype.Chunks[c];
                     for (var start = 0; start < chunk.Count; start += batchSize)
                         _items[destination++] = new ParallelQueryWorkItem(
-                            chunk, start, Math.Min(start + batchSize, chunk.Count), queryOffset + start);
+                            chunk, start, Math.Min(start + batchSize, chunk.Count), queryOffset + start, i);
                     queryOffset += chunk.Count;
                 }
             }
 
             _count = destination;
-            _next = -1;
+            _next = 0;
+            _itemsPerClaim = Math.Max(1, Math.Min(itemCount,
+                batchSize / ComponentPageManager.PageCapacity));
+            if (_cachedContentVersions.Length < matches.Count)
+                _cachedContentVersions = new int[Math.Max(matches.Count,
+                    _cachedContentVersions.Length == 0 ? 4 : _cachedContentVersions.Length * 2)];
+            for (var i = 0; i < matches.Count; i++)
+                _cachedContentVersions[i] = matches[i].ContentVersion;
+            _cachedMatchCount = matches.Count;
+            _cachedBatchSize = batchSize;
+            _cachedEntityCount = entityCount;
             return entityCount;
         }
 
-        internal void ExecuteWorker()
+        internal void ExecuteWorker(int threadIndex, int threadCount)
         {
-            while (true)
+            if (_cachedEntityCount > 100_000)
             {
-                var index = Interlocked.Increment(ref _next);
-                if (index >= _count) return;
-                Execute(in _items[index]);
+                ExecuteDynamic();
+                return;
+            }
+
+            var claimCount = ClaimCount;
+            var firstClaim = (int)((long)claimCount * threadIndex / threadCount);
+            var endClaim = (int)((long)claimCount * (threadIndex + 1) / threadCount);
+            for (var claimIndex = firstClaim; claimIndex < endClaim; claimIndex++)
+            {
+                var start = claimIndex * _itemsPerClaim;
+                var end = Math.Min(start + _itemsPerClaim, _count);
+                for (var index = start; index < end; index++) Execute(in _items[index]);
             }
         }
 
+        private void ExecuteDynamic()
+        {
+            while (true)
+            {
+                var claimIndex = Interlocked.Increment(ref _next) - 1;
+                if (claimIndex >= ClaimCount) return;
+                var start = claimIndex * _itemsPerClaim;
+                var end = Math.Min(start + _itemsPerClaim, _count);
+                for (var index = start; index < end; index++) Execute(in _items[index]);
+            }
+        }
+
+        protected virtual void EnsureDerivedMatchCapacity(int capacity) { }
+        protected virtual void PrepareMatches(List<Archetype> matches) { }
         protected abstract void Execute(in ParallelQueryWorkItem item);
     }
 
@@ -99,19 +168,26 @@ namespace LitheEcs
     {
         private readonly object _gate = new();
         private readonly Thread[] _workers;
+        private readonly AutoResetEvent[] _signals;
         private readonly Exception?[] _exceptions;
+        private readonly int _minimumWorkerEntityCount;
+        private readonly int _entitiesPerThread;
         private ParallelQueryJob? _job;
-        private int _generation;
         private int _remaining;
+        private int _activeThreadCount;
         private bool _disposed;
 
-        internal ParallelQueryRunner(int workerCount)
+        internal ParallelQueryRunner(int workerCount, int minimumWorkerEntityCount, int entitiesPerThread)
         {
+            _minimumWorkerEntityCount = minimumWorkerEntityCount;
+            _entitiesPerThread = entitiesPerThread;
             _workers = new Thread[workerCount];
+            _signals = new AutoResetEvent[workerCount];
             _exceptions = new Exception?[workerCount + 1];
             for (var i = 0; i < workerCount; i++)
             {
                 var workerIndex = i;
+                _signals[i] = new AutoResetEvent(false);
                 var thread = new Thread(() => WorkerLoop(workerIndex))
                 {
                     IsBackground = true,
@@ -125,17 +201,23 @@ namespace LitheEcs
         internal void Run(ParallelQueryJob job)
         {
             Array.Clear(_exceptions, 0, _exceptions.Length);
+            var entityCount = job.EntityCount;
+            var totalThreads = entityCount < _minimumWorkerEntityCount
+                ? 1
+                : Math.Max(1, Math.Min(_workers.Length + 1,
+                    (entityCount - 1) / _entitiesPerThread + 1));
+            var activeWorkerCount = totalThreads - 1;
             lock (_gate)
             {
                 _job = job;
-                _remaining = _workers.Length;
-                _generation++;
-                Monitor.PulseAll(_gate);
+                _remaining = activeWorkerCount;
+                _activeThreadCount = totalThreads;
             }
+            for (var i = 0; i < activeWorkerCount; i++) _signals[i].Set();
 
             try
             {
-                job.ExecuteWorker();
+                job.ExecuteWorker(activeWorkerCount, totalThreads);
             }
             catch (Exception exception)
             {
@@ -153,22 +235,21 @@ namespace LitheEcs
 
         private void WorkerLoop(int workerIndex)
         {
-            var observedGeneration = 0;
             while (true)
             {
+                _signals[workerIndex].WaitOne();
                 ParallelQueryJob job;
+                int threadCount;
                 lock (_gate)
                 {
-                    while (!_disposed && observedGeneration == _generation)
-                        Monitor.Wait(_gate);
                     if (_disposed) return;
-                    observedGeneration = _generation;
                     job = _job!;
+                    threadCount = _activeThreadCount;
                 }
 
                 try
                 {
-                    job.ExecuteWorker();
+                    job.ExecuteWorker(workerIndex, threadCount);
                 }
                 catch (Exception exception)
                 {
@@ -187,9 +268,10 @@ namespace LitheEcs
             {
                 if (_disposed) return;
                 _disposed = true;
-                Monitor.PulseAll(_gate);
             }
+            for (var i = 0; i < _signals.Length; i++) _signals[i].Set();
             for (var i = 0; i < _workers.Length; i++) _workers[i].Join();
+            for (var i = 0; i < _signals.Length; i++) _signals[i].Dispose();
         }
     }
 
@@ -1175,6 +1257,7 @@ namespace LitheEcs
             BatchSize = batchSize;
         }
 
+        /// <summary>Preallocates work ranges and current matching-archetype metadata.</summary>
         public void Reserve(int maximumEntityCount) =>
             _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
 
@@ -2973,6 +3056,9 @@ namespace LitheEcs
         private CollectorRegistry? _collectors;
         private int _parallelQueryActive;
         private ParallelQueryRunner? _parallelQueryRunner;
+        private int _parallelQueryWorkerCount = Math.Max(1, Environment.ProcessorCount - 1);
+        private int _parallelQueryMinimumWorkerEntityCount = 32_768;
+        private int _parallelQueryEntitiesPerThread = 8_192;
         private bool _disposed;
         private int _structuralBatchDepth;
 
@@ -3080,9 +3166,29 @@ namespace LitheEcs
             EnsureParallelQueryRunner();
         }
 
+        internal void ConfigureParallelQueryWorkerCount(int workerCount)
+        {
+            if (workerCount < 0) throw new ArgumentOutOfRangeException(nameof(workerCount));
+            if (_parallelQueryRunner != null)
+                throw new InvalidOperationException("Parallel Query workers have already been created.");
+            _parallelQueryWorkerCount = workerCount;
+        }
+
+        internal void ConfigureParallelQueryScheduling(int minimumWorkerEntityCount, int entitiesPerThread)
+        {
+            if (minimumWorkerEntityCount < 1)
+                throw new ArgumentOutOfRangeException(nameof(minimumWorkerEntityCount));
+            if (entitiesPerThread < 1) throw new ArgumentOutOfRangeException(nameof(entitiesPerThread));
+            if (_parallelQueryRunner != null)
+                throw new InvalidOperationException("Parallel Query workers have already been created.");
+            _parallelQueryMinimumWorkerEntityCount = minimumWorkerEntityCount;
+            _parallelQueryEntitiesPerThread = entitiesPerThread;
+        }
+
         private ParallelQueryRunner EnsureParallelQueryRunner() =>
             _parallelQueryRunner ??= new ParallelQueryRunner(
-                Math.Max(1, Environment.ProcessorCount - 1));
+                _parallelQueryWorkerCount, _parallelQueryMinimumWorkerEntityCount,
+                _parallelQueryEntitiesPerThread);
 
         internal static int GetParallelRangeReservationCount(int maximumEntityCount, int matchingArchetypeCount,
             int batchSize)
@@ -5908,6 +6014,7 @@ namespace LitheEcs
             if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
             job.EnsureItemCapacity(World.GetParallelRangeReservationCount(
                 maximumEntityCount, _plan.Matches.Count, batchSize));
+            job.EnsureMatchCapacity(_plan.Matches.Count);
         }
 
         internal void ParallelForRanges(ParallelRangeAction<T1> action, int minimumEntityCount, int batchSize)
@@ -5955,11 +6062,25 @@ namespace LitheEcs
         {
             internal World World = null!;
             internal ParallelRangeAction<T1> Action = null!;
+            private int[] _columnIndices = Array.Empty<int>();
+
+            protected override void EnsureDerivedMatchCapacity(int capacity)
+            {
+                if (_columnIndices.Length < capacity) _columnIndices = new int[capacity];
+            }
+
+            protected override void PrepareMatches(List<Archetype> matches)
+            {
+                EnsureDerivedMatchCapacity(matches.Count);
+                for (var i = 0; i < matches.Count; i++)
+                    _columnIndices[i] = matches[i].GetColumnIndex(ComponentType<T1>.Id);
+            }
 
             protected override void Execute(in ParallelQueryWorkItem item)
             {
                 var archetype = item.Archetype;
-                Action(archetype.GetColumn<T1>(item.Chunk).AsSpan(item.Start, item.End - item.Start),
+                Action(archetype.GetColumn<T1>(item.Chunk, _columnIndices[item.MatchIndex])
+                        .AsSpan(item.Start, item.End - item.Start),
                     new EntityRange(World, item.Chunk.EntityIds, item.Start, item.End - item.Start,
                         item.QueryOffset));
             }

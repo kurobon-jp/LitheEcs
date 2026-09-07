@@ -273,7 +273,14 @@ not stable between executions.
 - The ECB is owner-thread-only. Collect requests safely and record them after `Run()` returns.
 - Users must synchronize captured shared state.
 - Below `minimumEntityCount`, execution is sequential. Its default is 4,096.
-- Large archetypes are split into `batchSize` ranges. Its default is 4,096.
+- `Reserve(maximumEntityCount)` preallocates work ranges and metadata for archetypes that currently
+  match the query. Matching archetypes added later may still grow the metadata arrays.
+- Parallel work is claimed in groups of up to `batchSize` entities. Component spans remain bounded
+  by their storage page, so one claim may invoke the callback once for each included page. The
+  default is 4,096.
+- The calling thread participates alongside World-owned workers. Runs below 32,768 entities use
+  only the calling thread; larger runs activate about one thread per 8,192 entities, capped by the
+  logical processor count.
 
 ## 7. EntityCommandBuffer
 

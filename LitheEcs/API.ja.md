@@ -383,7 +383,13 @@ world.Query<Position>().AsParallelQuery().Run((positions, entities) =>
 - `EntityCommandBuffer`は所有thread専用のため、Parallel workerからコマンドを記録できません。構造変更の要求はthread-safeな方法で収集し、`ParallelQuery.Run`の完了後に所有threadから記録して`Playback()`してください。
 - callbackから共有状態へアクセスする場合は、利用者側で同期してください。複数のEntityから同じ変数や同じComponentへ同時に書き込まないでください。
 - Entity数が`minimumEntityCount`未満の場合は、呼び出し元のthreadで逐次実行します。既定値は4,096です。
-- 大きなArchetypeは、`batchSize`単位のEntity範囲に分割します。既定値は4,096です。
+- `Reserve(maximumEntityCount)`はwork rangeに加え、現在Queryに一致するArchetypeのmetadataも
+  事前確保します。後から一致Archetypeが増えた場合はmetadata配列が拡張されることがあります。
+- 並列処理では、最大`batchSize`件のEntityを一度にworkerへ割り当てます。Componentの`Span<T>`は
+  storage page内に収まるため、一つの割り当てに複数pageが含まれる場合はpageごとにcallbackを呼びます。
+  既定値は4,096です。
+- 呼び出し元threadも処理に参加します。32,768 Entity未満は呼び出し元threadのみを使い、それ以上では
+  約8,192 Entityごとに1 threadを起動します（論理processor数が上限です）。
 - DelegateはEntityごとではなく、Rangeごとに1回呼び出されます。
 
 ### Queryの制約

@@ -147,7 +147,10 @@ world.Query<Position, Velocity>()
 
 The callback receives matching component `Span<T>` values and the corresponding `EntityRange`.
 Below `minimumEntityCount`, the same callback runs sequentially on the calling thread. Both
-`minimumEntityCount` and `batchSize` default to 4,096.
+`minimumEntityCount` and `batchSize` default to 4,096. A worker claims up to `batchSize` entities
+at a time while callbacks continue to receive page-bounded spans. The calling thread participates
+alongside World-owned workers. Runs below 32,768 entities stay on the calling thread; larger runs
+activate roughly one thread per 8,192 entities, capped by the logical processor count.
 
 Each callback may update components in its own range, but it must synchronize access to captured
 shared state. Do not run parallel queries concurrently or perform structural changes while one is
