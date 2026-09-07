@@ -5195,6 +5195,7 @@ namespace LitheEcs
             _relationBackwardMasks = new ComponentMask[_versions.Length];
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void MoveEntityTo(in Entity entity, Archetype destination)
         {
             var sourceLocation = _locations[entity.Index];
