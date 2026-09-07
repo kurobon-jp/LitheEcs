@@ -4354,11 +4354,11 @@ namespace LitheEcs
         private void AddComponentFast<T>(in Entity entity, in T component, int typeId,
             in EntityLocation location) where T : struct
         {
-            EnsureComponentTypeCapacity(typeId);
             var source = location.IsValid ? location.Archetype : _archetypes.Empty;
             if (!source.Has(typeId))
             {
                 ThrowIfParallelQueryActive();
+                EnsureComponentTypeCapacity(typeId);
                 MoveEntityToSingleComponent(entity, _archetypes.With(source, typeId));
                 StructuralVersion++;
                 _componentVersions[typeId]++;
