@@ -4359,7 +4359,7 @@ namespace LitheEcs
             if (!source.Has(typeId))
             {
                 ThrowIfParallelQueryActive();
-                MoveEntityTo(entity, _archetypes.With(source, typeId));
+                MoveEntityToSingleComponent(entity, _archetypes.With(source, typeId));
                 StructuralVersion++;
                 _componentVersions[typeId]++;
             }
@@ -4776,7 +4776,7 @@ namespace LitheEcs
                 _locations[entity.Index] = default;
                 if (movedIndex >= 0) _locations[movedIndex] = new EntityLocation(location.Chunk, location.Row);
             }
-            else MoveEntityTo(entity, destination);
+            else MoveEntityToSingleComponent(entity, destination);
             _componentVersions[typeId]++;
             StructuralVersion++;
             return true;
@@ -5225,6 +5225,31 @@ namespace LitheEcs
             _locations[entity.Index] = targetLocation;
             if (movedIndex >= 0)
                 _locations[movedIndex] = new EntityLocation(sourceLocation.Chunk, sourceLocation.Row);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void MoveEntityToSingleComponent(in Entity entity, Archetype destination)
+        {
+            var sourceLocation = _locations[entity.Index];
+            if (sourceLocation.IsValid && ReferenceEquals(sourceLocation.Archetype, destination)) return;
+            if (destination.TypeIds.Length == 0)
+            {
+                if (!sourceLocation.IsValid) return;
+                var moved = sourceLocation.Archetype.RemoveAt(sourceLocation);
+                _locations[entity.Index] = default;
+                if (moved >= 0) _locations[moved] = new EntityLocation(sourceLocation.Chunk, sourceLocation.Row);
+                return;
+            }
+            if (!sourceLocation.IsValid)
+            {
+                _locations[entity.Index] = destination.Add(entity.Index);
+                return;
+            }
+            var target = destination.Add(entity.Index);
+            sourceLocation.Archetype.CopySharedComponents(sourceLocation, destination, target);
+            var movedIndex = sourceLocation.Archetype.RemoveAt(sourceLocation);
+            _locations[entity.Index] = target;
+            if (movedIndex >= 0) _locations[movedIndex] = new EntityLocation(sourceLocation.Chunk, sourceLocation.Row);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
