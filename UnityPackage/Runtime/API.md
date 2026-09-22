@@ -273,8 +273,8 @@ not stable between executions.
 - The ECB is owner-thread-only. Collect requests safely and record them after `Run()` returns.
 - Users must synchronize captured shared state.
 - Below `minimumEntityCount`, execution is sequential. Its default is 4,096.
-- `Reserve(maximumEntityCount)` preallocates work ranges and metadata for archetypes that currently
-  match the query. Matching archetypes added later may still grow the metadata arrays.
+- `Reserve(maximumEntityCount)` preallocates the reusable work-item buffer for up to the specified
+  number of matching entities. It does not retain per-archetype component-column metadata.
 - Parallel work is claimed in groups of up to `batchSize` entities. Component spans remain bounded
   by their storage page, so one claim may invoke the callback once for each included page. The
   default is 4,096.
