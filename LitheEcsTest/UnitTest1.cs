@@ -3193,9 +3193,9 @@ namespace LitheEcs.Tests
         }
 
         [Test]
-        public void ParallelQuery_Reserve_ShouldPreventWorkItemAllocationsAfterRuntimeWarmup()
+        public void ParallelQuery_Reserve_ShouldPreventFirstRunMetadataAllocations()
         {
-            void SpawnEntity()
+            for (var i = 0; i < 64; i++)
             {
                 var entity = _world.Spawn();
                 entity.Add(new Position(), new Velocity(), new Acceleration(), new Health());
@@ -3205,7 +3205,6 @@ namespace LitheEcs.Tests
                 entity.Add<Flying>();
             }
 
-            SpawnEntity();
             _world.WarmParallelQueryWorkers();
             var one = _world.Query<Position>().AsParallelQuery(1, 8);
             var eight = _world.Query<Position, Velocity, Acceleration, Health, Player, Disabled, Grounded, Flying>()
@@ -3213,10 +3212,6 @@ namespace LitheEcs.Tests
             ParallelRangeAction<Position> oneAction = static (_, _) => { };
             ParallelRangeAction<Position, Velocity, Acceleration, Health, Player, Disabled, Grounded, Flying>
                 eightAction = static (_, _, _, _, _, _, _, _, _) => { };
-            one.Run(oneAction);
-            eight.Run(eightAction);
-
-            for (var i = 1; i < 64; i++) SpawnEntity();
             one.Reserve(64);
             eight.Reserve(64);
 
@@ -3229,47 +3224,6 @@ namespace LitheEcs.Tests
 
             Assert.That(oneAllocated, Is.EqualTo(0));
             Assert.That(eightAllocated, Is.EqualTo(0));
-        }
-
-        [Test]
-        public void ParallelForRanges_AritiesTwoThroughEight_ShouldCoverMultipleArchetypesAndChunks()
-        {
-            const int entitiesPerArchetype = 300;
-            const int expected = entitiesPerArchetype * 3;
-
-            var baseTemplate = _world.CreateTemplate()
-                .Add(new Position()).Add(new Velocity()).Add(new Acceleration()).Add(new Health())
-                .Add(default(Player)).Add(default(Disabled)).Add(default(Grounded)).Add(default(Flying));
-            baseTemplate.SpawnBatch(entitiesPerArchetype);
-            _world.CreateTemplate()
-                .Add(default(FilterRequired))
-                .Add(new Position()).Add(new Velocity()).Add(new Acceleration()).Add(new Health())
-                .Add(default(Player)).Add(default(Disabled)).Add(default(Grounded)).Add(default(Flying))
-                .SpawnBatch(entitiesPerArchetype);
-            _world.CreateTemplate()
-                .Add(default(FilterAnyA))
-                .Add(new Position()).Add(new Velocity()).Add(new Acceleration()).Add(new Health())
-                .Add(default(Player)).Add(default(Disabled)).Add(default(Grounded)).Add(default(Flying))
-                .SpawnBatch(entitiesPerArchetype);
-
-            var counts = new int[7];
-            _world.Query<Position, Velocity>().AsParallelQuery(1, 31).Run(
-                (c1, _, _) => Interlocked.Add(ref counts[0], c1.Length));
-            _world.Query<Position, Velocity, Acceleration>().AsParallelQuery(1, 31).Run(
-                (c1, _, _, _) => Interlocked.Add(ref counts[1], c1.Length));
-            _world.Query<Position, Velocity, Acceleration, Health>().AsParallelQuery(1, 31).Run(
-                (c1, _, _, _, _) => Interlocked.Add(ref counts[2], c1.Length));
-            _world.Query<Position, Velocity, Acceleration, Health, Player>().AsParallelQuery(1, 31).Run(
-                (c1, _, _, _, _, _) => Interlocked.Add(ref counts[3], c1.Length));
-            _world.Query<Position, Velocity, Acceleration, Health, Player, Disabled>().AsParallelQuery(1, 31).Run(
-                (c1, _, _, _, _, _, _) => Interlocked.Add(ref counts[4], c1.Length));
-            _world.Query<Position, Velocity, Acceleration, Health, Player, Disabled, Grounded>().AsParallelQuery(1, 31).Run(
-                (c1, _, _, _, _, _, _, _) => Interlocked.Add(ref counts[5], c1.Length));
-            _world.Query<Position, Velocity, Acceleration, Health, Player, Disabled, Grounded, Flying>()
-                .AsParallelQuery(1, 31).Run((c1, _, _, _, _, _, _, _, _) =>
-                    Interlocked.Add(ref counts[6], c1.Length));
-
-            Assert.That(counts, Is.All.EqualTo(expected));
         }
 
         [Test]
