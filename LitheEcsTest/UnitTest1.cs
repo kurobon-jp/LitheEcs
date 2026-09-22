@@ -3096,6 +3096,52 @@ namespace LitheEcs.Tests
         }
 
         [Test]
+        public void JobQuery_AcquireRanges_ShouldSupportForwardAndBackwardAccessForEveryArity()
+        {
+            _world.Spawn().Add(new Position(1, 0, 0), new Velocity(10, 0, 0), new Acceleration(100, 0, 0));
+            var second = _world.Spawn();
+            second.Add(new Position(2, 0, 0), new Velocity(20, 0, 0), new Acceleration(200, 0, 0));
+            second.Add<Player>();
+            var third = _world.Spawn();
+            third.Add(new Position(3, 0, 0), new Velocity(30, 0, 0), new Acceleration(300, 0, 0));
+            third.Add<Disabled>();
+
+            var one = _world.Query<Position>().AsJobQuery().AcquireRanges();
+            Assert.That(one.RangeCount, Is.EqualTo(3));
+            var oneFirst = one.GetRange(0).Components1.Span[0].Value.X;
+            var oneLast = one.GetRange(2).Components1.Span[0].Value.X;
+            Assert.That(one.GetRange(0).Components1.Span[0].Value.X, Is.EqualTo(oneFirst));
+            Assert.That(one.GetRange(2).Components1.Span[0].Value.X, Is.EqualTo(oneLast));
+            one.Dispose();
+
+            var two = _world.Query<Position, Velocity>().AsJobQuery().AcquireRanges();
+            Assert.That(two.RangeCount, Is.EqualTo(3));
+            var twoFirst = two.GetRange(0).Components2.Span[0].Value.X;
+            var twoLast = two.GetRange(2).Components2.Span[0].Value.X;
+            Assert.That(two.GetRange(0).Components2.Span[0].Value.X, Is.EqualTo(twoFirst));
+            Assert.That(two.GetRange(2).Components2.Span[0].Value.X, Is.EqualTo(twoLast));
+            two.Dispose();
+
+            var three = _world.Query<Position, Velocity, Acceleration>().AsJobQuery().AcquireRanges();
+            Assert.That(three.RangeCount, Is.EqualTo(3));
+            var threeFirst = three.GetRange(0).Components3.Span[0].Value.X;
+            var threeLast = three.GetRange(2).Components3.Span[0].Value.X;
+            Assert.That(three.GetRange(0).Components3.Span[0].Value.X, Is.EqualTo(threeFirst));
+            Assert.That(three.GetRange(2).Components3.Span[0].Value.X, Is.EqualTo(threeLast));
+
+            var negativeRejected = false;
+            try { three.GetRange(-1); }
+            catch (ArgumentOutOfRangeException) { negativeRejected = true; }
+            Assert.That(negativeRejected, Is.True);
+
+            var upperBoundRejected = false;
+            try { three.GetRange(three.RangeCount); }
+            catch (ArgumentOutOfRangeException) { upperBoundRejected = true; }
+            Assert.That(upperBoundRejected, Is.True);
+            three.Dispose();
+        }
+
+        [Test]
         public void ParallelForRanges_ShouldUpdateEveryEntityAndExposeGeneratedMaximumArity()
         {
             for (var i = 0; i < 128; i++)
