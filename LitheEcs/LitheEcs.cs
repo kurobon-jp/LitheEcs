@@ -23,15 +23,13 @@ namespace LitheEcs
         internal readonly int Start;
         internal readonly int End;
         internal readonly int QueryOffset;
-        internal readonly int MatchIndex;
 
-        internal ParallelQueryWorkItem(ArchetypeChunk chunk, int start, int end, int queryOffset, int matchIndex)
+        internal ParallelQueryWorkItem(ArchetypeChunk chunk, int start, int end, int queryOffset)
         {
             Chunk = chunk;
             Start = start;
             End = end;
             QueryOffset = queryOffset;
-            MatchIndex = matchIndex;
         }
     }
 
@@ -40,47 +38,14 @@ namespace LitheEcs
         private ParallelQueryWorkItem[] _items = Array.Empty<ParallelQueryWorkItem>();
         private int _count;
         private int _next;
-        private int _itemsPerClaim;
-        private int[] _cachedContentVersions = Array.Empty<int>();
-        private int _cachedMatchCount = -1;
-        private int _cachedBatchSize;
-        private int _cachedEntityCount;
-
-        internal int ClaimCount => _count == 0 ? 0 : (_count - 1) / _itemsPerClaim + 1;
-        internal int EntityCount => _cachedEntityCount;
 
         internal void EnsureItemCapacity(int capacity)
         {
             if (_items.Length < capacity) _items = new ParallelQueryWorkItem[capacity];
         }
 
-        internal void EnsureMatchCapacity(int capacity)
-        {
-            if (capacity < 0) throw new ArgumentOutOfRangeException(nameof(capacity));
-            if (_cachedContentVersions.Length < capacity)
-                _cachedContentVersions = new int[capacity];
-            EnsureDerivedMatchCapacity(capacity);
-        }
-
         internal int Prepare(List<Archetype> matches, int batchSize)
         {
-            if (_cachedBatchSize == batchSize && _cachedMatchCount == matches.Count)
-            {
-                var cacheValid = true;
-                for (var i = 0; i < matches.Count; i++)
-                {
-                    if (_cachedContentVersions[i] == matches[i].ContentVersion) continue;
-                    cacheValid = false;
-                    break;
-                }
-
-                if (cacheValid)
-                {
-                    _next = 0;
-                    return _cachedEntityCount;
-                }
-            }
-
             var itemCount = 0;
             var entityCount = 0;
             for (var i = 0; i < matches.Count; i++)
@@ -99,7 +64,6 @@ namespace LitheEcs
 
             var destination = 0;
             var queryOffset = 0;
-            PrepareMatches(matches);
             for (var i = 0; i < matches.Count; i++)
             {
                 var archetype = matches[i];
@@ -108,59 +72,26 @@ namespace LitheEcs
                     var chunk = archetype.Chunks[c];
                     for (var start = 0; start < chunk.Count; start += batchSize)
                         _items[destination++] = new ParallelQueryWorkItem(
-                            chunk, start, Math.Min(start + batchSize, chunk.Count), queryOffset + start, i);
+                            chunk, start, Math.Min(start + batchSize, chunk.Count), queryOffset + start);
                     queryOffset += chunk.Count;
                 }
             }
 
             _count = destination;
-            _next = 0;
-            _itemsPerClaim = Math.Max(1, Math.Min(itemCount,
-                batchSize / ComponentPageManager.PageCapacity));
-            if (_cachedContentVersions.Length < matches.Count)
-                _cachedContentVersions = new int[Math.Max(matches.Count,
-                    _cachedContentVersions.Length == 0 ? 4 : _cachedContentVersions.Length * 2)];
-            for (var i = 0; i < matches.Count; i++)
-                _cachedContentVersions[i] = matches[i].ContentVersion;
-            _cachedMatchCount = matches.Count;
-            _cachedBatchSize = batchSize;
-            _cachedEntityCount = entityCount;
+            _next = -1;
             return entityCount;
         }
 
-        internal void ExecuteWorker(int threadIndex, int threadCount)
-        {
-            if (_cachedEntityCount > 100_000)
-            {
-                ExecuteDynamic();
-                return;
-            }
-
-            var claimCount = ClaimCount;
-            var firstClaim = (int)((long)claimCount * threadIndex / threadCount);
-            var endClaim = (int)((long)claimCount * (threadIndex + 1) / threadCount);
-            for (var claimIndex = firstClaim; claimIndex < endClaim; claimIndex++)
-            {
-                var start = claimIndex * _itemsPerClaim;
-                var end = Math.Min(start + _itemsPerClaim, _count);
-                for (var index = start; index < end; index++) Execute(in _items[index]);
-            }
-        }
-
-        private void ExecuteDynamic()
+        internal void ExecuteWorker()
         {
             while (true)
             {
-                var claimIndex = Interlocked.Increment(ref _next) - 1;
-                if (claimIndex >= ClaimCount) return;
-                var start = claimIndex * _itemsPerClaim;
-                var end = Math.Min(start + _itemsPerClaim, _count);
-                for (var index = start; index < end; index++) Execute(in _items[index]);
+                var index = Interlocked.Increment(ref _next);
+                if (index >= _count) return;
+                Execute(in _items[index]);
             }
         }
 
-        protected virtual void EnsureDerivedMatchCapacity(int capacity) { }
-        protected virtual void PrepareMatches(List<Archetype> matches) { }
         protected abstract void Execute(in ParallelQueryWorkItem item);
     }
 
@@ -168,26 +99,19 @@ namespace LitheEcs
     {
         private readonly object _gate = new();
         private readonly Thread[] _workers;
-        private readonly AutoResetEvent[] _signals;
         private readonly Exception?[] _exceptions;
-        private readonly int _minimumWorkerEntityCount;
-        private readonly int _entitiesPerThread;
         private ParallelQueryJob? _job;
+        private int _generation;
         private int _remaining;
-        private int _activeThreadCount;
         private bool _disposed;
 
-        internal ParallelQueryRunner(int workerCount, int minimumWorkerEntityCount, int entitiesPerThread)
+        internal ParallelQueryRunner(int workerCount)
         {
-            _minimumWorkerEntityCount = minimumWorkerEntityCount;
-            _entitiesPerThread = entitiesPerThread;
             _workers = new Thread[workerCount];
-            _signals = new AutoResetEvent[workerCount];
             _exceptions = new Exception?[workerCount + 1];
             for (var i = 0; i < workerCount; i++)
             {
                 var workerIndex = i;
-                _signals[i] = new AutoResetEvent(false);
                 var thread = new Thread(() => WorkerLoop(workerIndex))
                 {
                     IsBackground = true,
@@ -201,23 +125,17 @@ namespace LitheEcs
         internal void Run(ParallelQueryJob job)
         {
             Array.Clear(_exceptions, 0, _exceptions.Length);
-            var entityCount = job.EntityCount;
-            var totalThreads = entityCount < _minimumWorkerEntityCount
-                ? 1
-                : Math.Max(1, Math.Min(_workers.Length + 1,
-                    (entityCount - 1) / _entitiesPerThread + 1));
-            var activeWorkerCount = totalThreads - 1;
             lock (_gate)
             {
                 _job = job;
-                _remaining = activeWorkerCount;
-                _activeThreadCount = totalThreads;
+                _remaining = _workers.Length;
+                _generation++;
+                Monitor.PulseAll(_gate);
             }
-            for (var i = 0; i < activeWorkerCount; i++) _signals[i].Set();
 
             try
             {
-                job.ExecuteWorker(activeWorkerCount, totalThreads);
+                job.ExecuteWorker();
             }
             catch (Exception exception)
             {
@@ -235,21 +153,22 @@ namespace LitheEcs
 
         private void WorkerLoop(int workerIndex)
         {
+            var observedGeneration = 0;
             while (true)
             {
-                _signals[workerIndex].WaitOne();
                 ParallelQueryJob job;
-                int threadCount;
                 lock (_gate)
                 {
+                    while (!_disposed && observedGeneration == _generation)
+                        Monitor.Wait(_gate);
                     if (_disposed) return;
+                    observedGeneration = _generation;
                     job = _job!;
-                    threadCount = _activeThreadCount;
                 }
 
                 try
                 {
-                    job.ExecuteWorker(workerIndex, threadCount);
+                    job.ExecuteWorker();
                 }
                 catch (Exception exception)
                 {
@@ -268,10 +187,9 @@ namespace LitheEcs
             {
                 if (_disposed) return;
                 _disposed = true;
+                Monitor.PulseAll(_gate);
             }
-            for (var i = 0; i < _signals.Length; i++) _signals[i].Set();
             for (var i = 0; i < _workers.Length; i++) _workers[i].Join();
-            for (var i = 0; i < _signals.Length; i++) _signals[i].Dispose();
         }
     }
 
@@ -298,7 +216,7 @@ namespace LitheEcs
 
         public bool Equals(EntityId other) => Index == other.Index && Version == other.Version;
         public override bool Equals(object? obj) => obj is EntityId other && Equals(other);
-        public override int GetHashCode() => HashCode.Combine(Index, Version);
+        public override int GetHashCode() => unchecked((Index * 397) ^ (int)Version);
         public override string ToString() => Version == 0
             ? "EntityId(None)"
             : $"EntityId(Index: {Index}, Version: {Version})";
@@ -462,7 +380,9 @@ namespace LitheEcs
 
         public bool Equals(Entity other) => Index == other.Index && Version == other.Version && World == other.World;
         public override bool Equals(object? obj) => obj is Entity other && Equals(other);
-        public override int GetHashCode() => HashCode.Combine(Index, Version, World);
+        public override int GetHashCode() => unchecked(
+            ((Index * 397) ^ (int)Version) * 397 ^
+            (World == null ? 0 : RuntimeHelpers.GetHashCode(World)));
         public override string ToString() => World == null
             ? "Entity(None)"
             : $"Entity(Index: {Index}, Version: {Version}, World: {RuntimeHelpers.GetHashCode(World):X8})";
@@ -1230,6 +1150,16 @@ namespace LitheEcs
         void Execute(in Entity entity, ref T1 c1, ref T2 c2);
     }
 
+    public interface IComponentAction<T1> where T1 : struct
+    {
+        void Execute(ref T1 c1);
+    }
+
+    public interface IComponentAction<T1, T2> where T1 : struct where T2 : struct
+    {
+        void Execute(ref T1 c1, ref T2 c2);
+    }
+
     public interface IQueryAction<T1, T2, T3> where T1 : struct where T2 : struct where T3 : struct
     {
         void Execute(in Entity entity, ref T1 c1, ref T2 c2, ref T3 c3);
@@ -1257,7 +1187,6 @@ namespace LitheEcs
             BatchSize = batchSize;
         }
 
-        /// <summary>Preallocates work ranges and current matching-archetype metadata.</summary>
         public void Reserve(int maximumEntityCount) =>
             _source.ReserveParallelRangesCore(maximumEntityCount, BatchSize);
 
@@ -1310,10 +1239,6 @@ namespace LitheEcs
         public readonly Memory<T2> Components2;
         internal JobQueryRange(Memory<T1> components1, Memory<T2> components2)
         {
-#if _INTERNAL_DERIVED_USE_VALIDATION
-            if (components1.Length != components2.Length)
-                throw new InvalidOperationException("Job Query component ranges must have the same length.");
-#endif
             Components1 = components1;
             Components2 = components2;
         }
@@ -1328,10 +1253,6 @@ namespace LitheEcs
         public readonly Memory<T3> Components3;
         internal JobQueryRange(Memory<T1> components1, Memory<T2> components2, Memory<T3> components3)
         {
-#if _INTERNAL_DERIVED_USE_VALIDATION
-            if (components1.Length != components2.Length || components1.Length != components3.Length)
-                throw new InvalidOperationException("Job Query component ranges must have the same length.");
-#endif
             Components1 = components1;
             Components2 = components2;
             Components3 = components3;
@@ -1343,21 +1264,47 @@ namespace LitheEcs
     {
         private World? _world;
         private readonly List<Archetype> _ranges;
+        private readonly int _rangeCount;
+        private int _nextArchetypeIndex;
+        private int _nextChunkIndex;
+        private int _nextRangeIndex;
 
         internal JobQueryRangeLease(World world, List<Archetype> ranges)
         {
             _world = world;
             _ranges = ranges;
+            _rangeCount = CountRanges(ranges);
+            _nextArchetypeIndex = 0;
+            _nextChunkIndex = 0;
+            _nextRangeIndex = 0;
         }
 
-        public int RangeCount { get { var count = 0; for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) if (_ranges[i].Chunks[c].Count != 0) count++; return count; } }
+        public int RangeCount => _rangeCount;
 
         public JobQueryRange<T1> GetRange(int index)
         {
             if (_world == null) throw new ObjectDisposedException(nameof(JobQueryRangeLease<T1>));
-            for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) { var chunk = _ranges[i].Chunks[c]; if (chunk.Count == 0) continue; if (index-- == 0) return new JobQueryRange<T1>(_ranges[i].GetColumn<T1>(chunk).AsMemory(0, chunk.Count)); }
+            if ((uint)index >= (uint)_rangeCount) throw new ArgumentOutOfRangeException(nameof(index));
+            if (index < _nextRangeIndex) ResetCursor();
+            while (_nextArchetypeIndex < _ranges.Count)
+            {
+                var archetype = _ranges[_nextArchetypeIndex];
+                if (_nextChunkIndex >= archetype.Chunks.Count)
+                {
+                    _nextArchetypeIndex++;
+                    _nextChunkIndex = 0;
+                    continue;
+                }
+                var chunk = archetype.Chunks[_nextChunkIndex++];
+                if (chunk.Count == 0) continue;
+                if (_nextRangeIndex++ != index) continue;
+                return new JobQueryRange<T1>(archetype.GetColumn<T1>(chunk).AsMemory(0, chunk.Count));
+            }
             throw new ArgumentOutOfRangeException(nameof(index));
         }
+
+        private void ResetCursor() { _nextArchetypeIndex = 0; _nextChunkIndex = 0; _nextRangeIndex = 0; }
+        private static int CountRanges(List<Archetype> ranges) { var count = 0; for (var i = 0; i < ranges.Count; i++) for (var c = 0; c < ranges[i].Chunks.Count; c++) if (ranges[i].Chunks[c].Count != 0) count++; return count; }
 
         public void Dispose()
         {
@@ -1371,21 +1318,47 @@ namespace LitheEcs
     {
         private World? _world;
         private readonly List<Archetype> _ranges;
+        private readonly int _rangeCount;
+        private int _nextArchetypeIndex;
+        private int _nextChunkIndex;
+        private int _nextRangeIndex;
 
         internal JobQueryRangeLease(World world, List<Archetype> ranges)
         {
             _world = world;
             _ranges = ranges;
+            _rangeCount = CountRanges(ranges);
+            _nextArchetypeIndex = 0;
+            _nextChunkIndex = 0;
+            _nextRangeIndex = 0;
         }
 
-        public int RangeCount { get { var count = 0; for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) if (_ranges[i].Chunks[c].Count != 0) count++; return count; } }
+        public int RangeCount => _rangeCount;
 
         public JobQueryRange<T1, T2> GetRange(int index)
         {
             if (_world == null) throw new ObjectDisposedException(nameof(JobQueryRangeLease<T1, T2>));
-            for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) { var archetype = _ranges[i]; var chunk = archetype.Chunks[c]; if (chunk.Count == 0) continue; if (index-- == 0) return new JobQueryRange<T1, T2>(archetype.GetColumn<T1>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T2>(chunk).AsMemory(0, chunk.Count)); }
+            if ((uint)index >= (uint)_rangeCount) throw new ArgumentOutOfRangeException(nameof(index));
+            if (index < _nextRangeIndex) ResetCursor();
+            while (_nextArchetypeIndex < _ranges.Count)
+            {
+                var archetype = _ranges[_nextArchetypeIndex];
+                if (_nextChunkIndex >= archetype.Chunks.Count)
+                {
+                    _nextArchetypeIndex++;
+                    _nextChunkIndex = 0;
+                    continue;
+                }
+                var chunk = archetype.Chunks[_nextChunkIndex++];
+                if (chunk.Count == 0) continue;
+                if (_nextRangeIndex++ != index) continue;
+                return new JobQueryRange<T1, T2>(archetype.GetColumn<T1>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T2>(chunk).AsMemory(0, chunk.Count));
+            }
             throw new ArgumentOutOfRangeException(nameof(index));
         }
+
+        private void ResetCursor() { _nextArchetypeIndex = 0; _nextChunkIndex = 0; _nextRangeIndex = 0; }
+        private static int CountRanges(List<Archetype> ranges) { var count = 0; for (var i = 0; i < ranges.Count; i++) for (var c = 0; c < ranges[i].Chunks.Count; c++) if (ranges[i].Chunks[c].Count != 0) count++; return count; }
 
         public void Dispose()
         {
@@ -1400,21 +1373,47 @@ namespace LitheEcs
     {
         private World? _world;
         private readonly List<Archetype> _ranges;
+        private readonly int _rangeCount;
+        private int _nextArchetypeIndex;
+        private int _nextChunkIndex;
+        private int _nextRangeIndex;
 
         internal JobQueryRangeLease(World world, List<Archetype> ranges)
         {
             _world = world;
             _ranges = ranges;
+            _rangeCount = CountRanges(ranges);
+            _nextArchetypeIndex = 0;
+            _nextChunkIndex = 0;
+            _nextRangeIndex = 0;
         }
 
-        public int RangeCount { get { var count = 0; for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) if (_ranges[i].Chunks[c].Count != 0) count++; return count; } }
+        public int RangeCount => _rangeCount;
 
         public JobQueryRange<T1, T2, T3> GetRange(int index)
         {
             if (_world == null) throw new ObjectDisposedException(nameof(JobQueryRangeLease<T1, T2, T3>));
-            for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) { var archetype = _ranges[i]; var chunk = archetype.Chunks[c]; if (chunk.Count == 0) continue; if (index-- == 0) return new JobQueryRange<T1, T2, T3>(archetype.GetColumn<T1>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T2>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T3>(chunk).AsMemory(0, chunk.Count)); }
+            if ((uint)index >= (uint)_rangeCount) throw new ArgumentOutOfRangeException(nameof(index));
+            if (index < _nextRangeIndex) ResetCursor();
+            while (_nextArchetypeIndex < _ranges.Count)
+            {
+                var archetype = _ranges[_nextArchetypeIndex];
+                if (_nextChunkIndex >= archetype.Chunks.Count)
+                {
+                    _nextArchetypeIndex++;
+                    _nextChunkIndex = 0;
+                    continue;
+                }
+                var chunk = archetype.Chunks[_nextChunkIndex++];
+                if (chunk.Count == 0) continue;
+                if (_nextRangeIndex++ != index) continue;
+                return new JobQueryRange<T1, T2, T3>(archetype.GetColumn<T1>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T2>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T3>(chunk).AsMemory(0, chunk.Count));
+            }
             throw new ArgumentOutOfRangeException(nameof(index));
         }
+
+        private void ResetCursor() { _nextArchetypeIndex = 0; _nextChunkIndex = 0; _nextRangeIndex = 0; }
+        private static int CountRanges(List<Archetype> ranges) { var count = 0; for (var i = 0; i < ranges.Count; i++) for (var c = 0; c < ranges[i].Chunks.Count; c++) if (ranges[i].Chunks[c].Count != 0) count++; return count; }
 
         public void Dispose()
         {
@@ -3056,9 +3055,6 @@ namespace LitheEcs
         private CollectorRegistry? _collectors;
         private int _parallelQueryActive;
         private ParallelQueryRunner? _parallelQueryRunner;
-        private int _parallelQueryWorkerCount = Math.Max(1, Environment.ProcessorCount - 1);
-        private int _parallelQueryMinimumWorkerEntityCount = 32_768;
-        private int _parallelQueryEntitiesPerThread = 8_192;
         private bool _disposed;
         private int _structuralBatchDepth;
 
@@ -3166,29 +3162,9 @@ namespace LitheEcs
             EnsureParallelQueryRunner();
         }
 
-        internal void ConfigureParallelQueryWorkerCount(int workerCount)
-        {
-            if (workerCount < 0) throw new ArgumentOutOfRangeException(nameof(workerCount));
-            if (_parallelQueryRunner != null)
-                throw new InvalidOperationException("Parallel Query workers have already been created.");
-            _parallelQueryWorkerCount = workerCount;
-        }
-
-        internal void ConfigureParallelQueryScheduling(int minimumWorkerEntityCount, int entitiesPerThread)
-        {
-            if (minimumWorkerEntityCount < 1)
-                throw new ArgumentOutOfRangeException(nameof(minimumWorkerEntityCount));
-            if (entitiesPerThread < 1) throw new ArgumentOutOfRangeException(nameof(entitiesPerThread));
-            if (_parallelQueryRunner != null)
-                throw new InvalidOperationException("Parallel Query workers have already been created.");
-            _parallelQueryMinimumWorkerEntityCount = minimumWorkerEntityCount;
-            _parallelQueryEntitiesPerThread = entitiesPerThread;
-        }
-
         private ParallelQueryRunner EnsureParallelQueryRunner() =>
             _parallelQueryRunner ??= new ParallelQueryRunner(
-                _parallelQueryWorkerCount, _parallelQueryMinimumWorkerEntityCount,
-                _parallelQueryEntitiesPerThread);
+                Math.Max(1, Environment.ProcessorCount - 1));
 
         internal static int GetParallelRangeReservationCount(int maximumEntityCount, int matchingArchetypeCount,
             int batchSize)
@@ -4321,11 +4297,6 @@ namespace LitheEcs
             }
             var typeId = ComponentType<T>.Id;
             var location = _locations[entity.Index];
-            if (CanMutateComponentsFast() && !SingletonType<T>.IsSingleton)
-            {
-                AddComponentFast(entity, component, typeId, location);
-                return;
-            }
             var isNew = !location.IsValid || !location.Archetype.Has(typeId);
             if (isNew) ThrowIfParallelQueryActive();
             EnsureComponentTypeCapacity(typeId);
@@ -4348,23 +4319,6 @@ namespace LitheEcs
                 _singletonTypeMask.Set(typeId);
             }
             PublishComponentEvent(typeId, entity, isNew ? ComponentEvent.KeyAdded : ComponentEvent.KeyChanged);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void AddComponentFast<T>(in Entity entity, in T component, int typeId,
-            in EntityLocation location) where T : struct
-        {
-            var source = location.IsValid ? location.Archetype : _archetypes.Empty;
-            if (!source.Has(typeId))
-            {
-                ThrowIfParallelQueryActive();
-                EnsureComponentTypeCapacity(typeId);
-                MoveEntityToSingleComponent(entity, _archetypes.With(source, typeId));
-                StructuralVersion++;
-                _componentVersions[typeId]++;
-            }
-            var target = _locations[entity.Index];
-            target.Archetype.Get<T>(target) = component;
         }
 
         public void AddComponents<T1, T2>(Entity entity, T1 component1, T2 component2)
@@ -4753,9 +4707,6 @@ namespace LitheEcs
             if (!location.IsValid || !location.Archetype.Has(typeId)) return false;
             ThrowIfParallelQueryActive();
 
-            if (CanMutateComponentsFast() && !SingletonType<T>.IsSingleton)
-                return RemoveComponentFast(entity, location, typeId);
-
             MoveEntityTo(entity, _archetypes.Without(location.Archetype, typeId));
             _componentVersions[typeId]++;
             if (SingletonType<T>.IsSingleton && _singletonEntities != null && _singletonEntities[typeId] == entity)
@@ -4763,22 +4714,6 @@ namespace LitheEcs
             StructuralVersion++;
             NotifyFilterComponentChanged(typeId, entity.Index);
             PublishComponentEvent(typeId, entity, ComponentEvent.KeyRemoved);
-            return true;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool RemoveComponentFast(in Entity entity, in EntityLocation location, int typeId)
-        {
-            var destination = _archetypes.Without(location.Archetype, typeId);
-            if (destination.TypeIds.Length == 0)
-            {
-                var movedIndex = location.Archetype.RemoveAt(location);
-                _locations[entity.Index] = default;
-                if (movedIndex >= 0) _locations[movedIndex] = new EntityLocation(location.Chunk, location.Row);
-            }
-            else MoveEntityToSingleComponent(entity, destination);
-            _componentVersions[typeId]++;
-            StructuralVersion++;
             return true;
         }
 
@@ -5174,6 +5109,10 @@ namespace LitheEcs
             if (typeId < _componentVersions.Length) return;
             var capacity = Math.Max(typeId + 1, _componentVersions.Length * 2);
             Array.Resize(ref _componentVersions, capacity);
+#if _INTERNAL_DERIVED_USE_DIAGNOSTICS
+            Array.Resize(ref _componentEntityCounts, capacity);
+            Array.Resize(ref _peakComponentEntityCounts, capacity);
+#endif
             if (_singletonEntities != null) Array.Resize(ref _singletonEntities, capacity);
             if (_incrementalQueryPlans != null) Array.Resize(ref _incrementalQueryPlans, capacity);
         }
@@ -5191,7 +5130,6 @@ namespace LitheEcs
             _relationBackwardMasks = new ComponentMask[_versions.Length];
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void MoveEntityTo(in Entity entity, Archetype destination)
         {
             var sourceLocation = _locations[entity.Index];
@@ -5221,31 +5159,6 @@ namespace LitheEcs
             _locations[entity.Index] = targetLocation;
             if (movedIndex >= 0)
                 _locations[movedIndex] = new EntityLocation(sourceLocation.Chunk, sourceLocation.Row);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void MoveEntityToSingleComponent(in Entity entity, Archetype destination)
-        {
-            var sourceLocation = _locations[entity.Index];
-            if (sourceLocation.IsValid && ReferenceEquals(sourceLocation.Archetype, destination)) return;
-            if (destination.TypeIds.Length == 0)
-            {
-                if (!sourceLocation.IsValid) return;
-                var moved = sourceLocation.Archetype.RemoveAt(sourceLocation);
-                _locations[entity.Index] = default;
-                if (moved >= 0) _locations[moved] = new EntityLocation(sourceLocation.Chunk, sourceLocation.Row);
-                return;
-            }
-            if (!sourceLocation.IsValid)
-            {
-                _locations[entity.Index] = destination.Add(entity.Index);
-                return;
-            }
-            var target = destination.Add(entity.Index);
-            sourceLocation.Archetype.CopySharedComponents(sourceLocation, destination, target);
-            var movedIndex = sourceLocation.Archetype.RemoveAt(sourceLocation);
-            _locations[entity.Index] = target;
-            if (movedIndex >= 0) _locations[movedIndex] = new EntityLocation(sourceLocation.Chunk, sourceLocation.Row);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -6077,7 +5990,23 @@ namespace LitheEcs
             if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob();
             job.EnsureItemCapacity(World.GetParallelRangeReservationCount(
                 maximumEntityCount, _plan.Matches.Count, batchSize));
-            job.EnsureMatchCapacity(_plan.Matches.Count);
+        }
+
+        [Obsolete("Use ForEach(ref action) instead. Omitting Entity access does not justify a separate iteration API.")]
+        public void ForEachComponents<TAction>(ref TAction action) where TAction : struct, IComponentAction<T1>
+        {
+            _plan.Ensure();
+            var matches = _plan.Matches;
+            for (var a = 0; a < matches.Count; a++)
+            {
+                var archetype = matches[a];
+                for (var c = 0; c < archetype.Chunks.Count; c++)
+                {
+                    var chunk = archetype.Chunks[c];
+                    var components = archetype.GetColumn<T1>(chunk);
+                    for (var i = 0; i < chunk.Count; i++) action.Execute(ref components[i]);
+                }
+            }
         }
 
         internal void ParallelForRanges(ParallelRangeAction<T1> action, int minimumEntityCount, int batchSize)
@@ -6125,25 +6054,11 @@ namespace LitheEcs
         {
             internal World World = null!;
             internal ParallelRangeAction<T1> Action = null!;
-            private int[] _columnIndices = Array.Empty<int>();
-
-            protected override void EnsureDerivedMatchCapacity(int capacity)
-            {
-                if (_columnIndices.Length < capacity) _columnIndices = new int[capacity];
-            }
-
-            protected override void PrepareMatches(List<Archetype> matches)
-            {
-                EnsureDerivedMatchCapacity(matches.Count);
-                for (var i = 0; i < matches.Count; i++)
-                    _columnIndices[i] = matches[i].GetColumnIndex(ComponentType<T1>.Id);
-            }
 
             protected override void Execute(in ParallelQueryWorkItem item)
             {
                 var archetype = item.Archetype;
-                Action(archetype.GetColumn<T1>(item.Chunk, _columnIndices[item.MatchIndex])
-                        .AsSpan(item.Start, item.End - item.Start),
+                Action(archetype.GetColumn<T1>(item.Chunk).AsSpan(item.Start, item.End - item.Start),
                     new EntityRange(World, item.Chunk.EntityIds, item.Start, item.End - item.Start,
                         item.QueryOffset));
             }
