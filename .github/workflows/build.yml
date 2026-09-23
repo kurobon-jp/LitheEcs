@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   compile:
     name: Compile solution
@@ -26,3 +30,6 @@ jobs:
 
       - name: Build solution
         run: dotnet build LitheEcs.sln --configuration Release --no-restore
+
+      - name: Test solution
+        run: dotnet test LitheEcs.sln --configuration Release --no-build --no-restore
