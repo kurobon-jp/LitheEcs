@@ -22,7 +22,6 @@ namespace LitheEcs.Unity.EntityVisualize
         public static void Clear()
         {
             Worlds.Clear();
-            OnRegistered = null;
         }
     }
 }

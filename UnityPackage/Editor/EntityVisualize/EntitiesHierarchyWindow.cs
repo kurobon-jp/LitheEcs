@@ -263,6 +263,7 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
             Selection.activeObject = null;
             _snapshot = null;
             _snapshotWorld = null;
+            _selectedWorld = null;
             _snapshotStructuralVersion = -1;
             _filterDirty = true;
             if (_rootItems == null) return;
