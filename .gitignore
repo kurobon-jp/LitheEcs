@@ -6,6 +6,8 @@
 
 # 3. バージョン管理に含めたいファイルを指定
 !/.gitignore
+!/.github/
+!/.github/**
 !/README.*
 !/LICENSE
 !/LitheEcs.sln
