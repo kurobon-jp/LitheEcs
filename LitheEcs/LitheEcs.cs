@@ -1343,20 +1343,60 @@ namespace LitheEcs
     {
         private World? _world;
         private readonly List<Archetype> _ranges;
+        private readonly int _rangeCount;
+        private int _nextArchetypeIndex;
+        private int _nextChunkIndex;
+        private int _nextRangeIndex;
 
         internal JobQueryRangeLease(World world, List<Archetype> ranges)
         {
             _world = world;
             _ranges = ranges;
+            _rangeCount = CountRanges(ranges);
+            _nextArchetypeIndex = 0;
+            _nextChunkIndex = 0;
+            _nextRangeIndex = 0;
         }
 
-        public int RangeCount { get { var count = 0; for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) if (_ranges[i].Chunks[c].Count != 0) count++; return count; } }
+        public int RangeCount => _rangeCount;
 
         public JobQueryRange<T1> GetRange(int index)
         {
             if (_world == null) throw new ObjectDisposedException(nameof(JobQueryRangeLease<T1>));
-            for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) { var chunk = _ranges[i].Chunks[c]; if (chunk.Count == 0) continue; if (index-- == 0) return new JobQueryRange<T1>(_ranges[i].GetColumn<T1>(chunk).AsMemory(0, chunk.Count)); }
+            if ((uint)index >= (uint)_rangeCount) throw new ArgumentOutOfRangeException(nameof(index));
+            if (index < _nextRangeIndex) ResetCursor();
+            for (var i = _nextArchetypeIndex; i < _ranges.Count; i++)
+            {
+                var archetype = _ranges[i];
+                var firstChunk = i == _nextArchetypeIndex ? _nextChunkIndex : 0;
+                for (var c = firstChunk; c < archetype.Chunks.Count; c++)
+                {
+                    var chunk = archetype.Chunks[c];
+                    if (chunk.Count == 0) continue;
+                    var rangeIndex = _nextRangeIndex++;
+                    _nextArchetypeIndex = c + 1 < archetype.Chunks.Count ? i : i + 1;
+                    _nextChunkIndex = c + 1 < archetype.Chunks.Count ? c + 1 : 0;
+                    if (rangeIndex == index)
+                        return new JobQueryRange<T1>(archetype.GetColumn<T1>(chunk).AsMemory(0, chunk.Count));
+                }
+            }
             throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        private void ResetCursor()
+        {
+            _nextArchetypeIndex = 0;
+            _nextChunkIndex = 0;
+            _nextRangeIndex = 0;
+        }
+
+        private static int CountRanges(List<Archetype> ranges)
+        {
+            var count = 0;
+            for (var i = 0; i < ranges.Count; i++)
+                for (var c = 0; c < ranges[i].Chunks.Count; c++)
+                    if (ranges[i].Chunks[c].Count != 0) count++;
+            return count;
         }
 
         public void Dispose()
@@ -1371,20 +1411,60 @@ namespace LitheEcs
     {
         private World? _world;
         private readonly List<Archetype> _ranges;
+        private readonly int _rangeCount;
+        private int _nextArchetypeIndex;
+        private int _nextChunkIndex;
+        private int _nextRangeIndex;
 
         internal JobQueryRangeLease(World world, List<Archetype> ranges)
         {
             _world = world;
             _ranges = ranges;
+            _rangeCount = CountRanges(ranges);
+            _nextArchetypeIndex = 0;
+            _nextChunkIndex = 0;
+            _nextRangeIndex = 0;
         }
 
-        public int RangeCount { get { var count = 0; for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) if (_ranges[i].Chunks[c].Count != 0) count++; return count; } }
+        public int RangeCount => _rangeCount;
 
         public JobQueryRange<T1, T2> GetRange(int index)
         {
             if (_world == null) throw new ObjectDisposedException(nameof(JobQueryRangeLease<T1, T2>));
-            for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) { var archetype = _ranges[i]; var chunk = archetype.Chunks[c]; if (chunk.Count == 0) continue; if (index-- == 0) return new JobQueryRange<T1, T2>(archetype.GetColumn<T1>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T2>(chunk).AsMemory(0, chunk.Count)); }
+            if ((uint)index >= (uint)_rangeCount) throw new ArgumentOutOfRangeException(nameof(index));
+            if (index < _nextRangeIndex) ResetCursor();
+            for (var i = _nextArchetypeIndex; i < _ranges.Count; i++)
+            {
+                var archetype = _ranges[i];
+                var firstChunk = i == _nextArchetypeIndex ? _nextChunkIndex : 0;
+                for (var c = firstChunk; c < archetype.Chunks.Count; c++)
+                {
+                    var chunk = archetype.Chunks[c];
+                    if (chunk.Count == 0) continue;
+                    var rangeIndex = _nextRangeIndex++;
+                    _nextArchetypeIndex = c + 1 < archetype.Chunks.Count ? i : i + 1;
+                    _nextChunkIndex = c + 1 < archetype.Chunks.Count ? c + 1 : 0;
+                    if (rangeIndex == index)
+                        return new JobQueryRange<T1, T2>(archetype.GetColumn<T1>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T2>(chunk).AsMemory(0, chunk.Count));
+                }
+            }
             throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        private void ResetCursor()
+        {
+            _nextArchetypeIndex = 0;
+            _nextChunkIndex = 0;
+            _nextRangeIndex = 0;
+        }
+
+        private static int CountRanges(List<Archetype> ranges)
+        {
+            var count = 0;
+            for (var i = 0; i < ranges.Count; i++)
+                for (var c = 0; c < ranges[i].Chunks.Count; c++)
+                    if (ranges[i].Chunks[c].Count != 0) count++;
+            return count;
         }
 
         public void Dispose()
@@ -1400,20 +1480,60 @@ namespace LitheEcs
     {
         private World? _world;
         private readonly List<Archetype> _ranges;
+        private readonly int _rangeCount;
+        private int _nextArchetypeIndex;
+        private int _nextChunkIndex;
+        private int _nextRangeIndex;
 
         internal JobQueryRangeLease(World world, List<Archetype> ranges)
         {
             _world = world;
             _ranges = ranges;
+            _rangeCount = CountRanges(ranges);
+            _nextArchetypeIndex = 0;
+            _nextChunkIndex = 0;
+            _nextRangeIndex = 0;
         }
 
-        public int RangeCount { get { var count = 0; for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) if (_ranges[i].Chunks[c].Count != 0) count++; return count; } }
+        public int RangeCount => _rangeCount;
 
         public JobQueryRange<T1, T2, T3> GetRange(int index)
         {
             if (_world == null) throw new ObjectDisposedException(nameof(JobQueryRangeLease<T1, T2, T3>));
-            for (var i = 0; i < _ranges.Count; i++) for (var c = 0; c < _ranges[i].Chunks.Count; c++) { var archetype = _ranges[i]; var chunk = archetype.Chunks[c]; if (chunk.Count == 0) continue; if (index-- == 0) return new JobQueryRange<T1, T2, T3>(archetype.GetColumn<T1>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T2>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T3>(chunk).AsMemory(0, chunk.Count)); }
+            if ((uint)index >= (uint)_rangeCount) throw new ArgumentOutOfRangeException(nameof(index));
+            if (index < _nextRangeIndex) ResetCursor();
+            for (var i = _nextArchetypeIndex; i < _ranges.Count; i++)
+            {
+                var archetype = _ranges[i];
+                var firstChunk = i == _nextArchetypeIndex ? _nextChunkIndex : 0;
+                for (var c = firstChunk; c < archetype.Chunks.Count; c++)
+                {
+                    var chunk = archetype.Chunks[c];
+                    if (chunk.Count == 0) continue;
+                    var rangeIndex = _nextRangeIndex++;
+                    _nextArchetypeIndex = c + 1 < archetype.Chunks.Count ? i : i + 1;
+                    _nextChunkIndex = c + 1 < archetype.Chunks.Count ? c + 1 : 0;
+                    if (rangeIndex == index)
+                        return new JobQueryRange<T1, T2, T3>(archetype.GetColumn<T1>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T2>(chunk).AsMemory(0, chunk.Count), archetype.GetColumn<T3>(chunk).AsMemory(0, chunk.Count));
+                }
+            }
             throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        private void ResetCursor()
+        {
+            _nextArchetypeIndex = 0;
+            _nextChunkIndex = 0;
+            _nextRangeIndex = 0;
+        }
+
+        private static int CountRanges(List<Archetype> ranges)
+        {
+            var count = 0;
+            for (var i = 0; i < ranges.Count; i++)
+                for (var c = 0; c < ranges[i].Chunks.Count; c++)
+                    if (ranges[i].Chunks[c].Count != 0) count++;
+            return count;
         }
 
         public void Dispose()
