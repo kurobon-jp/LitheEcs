@@ -2371,6 +2371,13 @@ namespace LitheEcs
             for (var i = 0; i < _layouts.Count; i++)
                 if (LayoutsEqual(_layouts[i], layout))
                     throw new InvalidOperationException("The same Archetype layout was added more than once.");
+            if (alias != null)
+            {
+                for (var i = 0; i < _aliases.Count; i++)
+                    if (string.Equals(_aliases[i], alias, StringComparison.Ordinal))
+                        throw new InvalidOperationException($"Archetype alias '{alias}' is already in use.");
+                _world.ValidateArchetypeAlias(layout, alias);
+            }
             _layouts.Add(layout);
             _aliases.Add(alias);
             for (var i = 0; i < layout.Length; i++) _componentMask.Set(layout[i]);
@@ -3465,6 +3472,7 @@ namespace LitheEcs
             var typeIds = builder.GetTypeIds();
             if (typeIds.Length == 0)
                 throw new InvalidOperationException("At least one component type is required.");
+            if (builder.GetAlias() is { } alias) ValidateArchetypeAlias(typeIds, alias);
             var archetype = _archetypes.WithMany(_archetypes.Empty, typeIds);
             SetArchetypeAlias(archetype, builder.GetAlias());
             // Dedicated Archetype storage must be added to the pool before it is rented.
@@ -3494,6 +3502,13 @@ namespace LitheEcs
             if (layouts.Count == 0)
                 throw new InvalidOperationException("At least one Archetype layout is required.");
             ReserveArchetypeLayouts(totalCapacity, layouts, builder.Aliases, builder.GetSharedTypeIds());
+        }
+
+        internal void ValidateArchetypeAlias(int[] typeIds, string alias)
+        {
+            if (_archetypesByAlias == null || !_archetypesByAlias.TryGetValue(alias, out var existing)) return;
+            if (_archetypes.TryGet(typeIds, out var archetype) && ReferenceEquals(existing, archetype)) return;
+            throw new InvalidOperationException($"Archetype alias '{alias}' is already in use.");
         }
 
         private void ReserveArchetypeLayouts(int totalCapacity, List<int[]> layouts, List<string?> aliases,

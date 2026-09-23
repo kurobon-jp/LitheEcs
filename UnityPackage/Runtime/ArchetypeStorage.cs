@@ -693,6 +693,9 @@ namespace LitheEcs
             return archetype;
         }
 
+        internal bool TryGet(int[] sortedTypeIds, out Archetype archetype) =>
+            _byKey.TryGetValue(new ArchetypeKey(sortedTypeIds), out archetype!);
+
         internal Archetype With(Archetype source, int typeId)
         {
             if (source.Has(typeId)) return source;

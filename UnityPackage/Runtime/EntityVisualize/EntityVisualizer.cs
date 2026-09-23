@@ -19,6 +19,19 @@ namespace LitheEcs.Unity.EntityVisualize
             OnRegistered?.Invoke(name, world);
         }
 
+        public static bool Unregister(string name) => Worlds.Remove(name);
+
+        public static int Unregister(World world)
+        {
+            var removed = 0;
+            foreach (var pair in new List<KeyValuePair<string, World>>(Worlds))
+            {
+                if (!ReferenceEquals(pair.Value, world)) continue;
+                if (Worlds.Remove(pair.Key)) removed++;
+            }
+            return removed;
+        }
+
         public static void Clear()
         {
             Worlds.Clear();
