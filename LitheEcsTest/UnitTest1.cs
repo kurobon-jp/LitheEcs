@@ -2932,6 +2932,30 @@ namespace LitheEcs.Tests
         }
 
         [Test]
+        public void ReserveArchetypeGroup_ShouldValidateAliasesBeforeReservingPages()
+        {
+            Assert.Throws<InvalidOperationException>(() => _world.ReserveArchetypeGroup(1, static group => group
+                .Add(static archetype => archetype.Alias("Shared").Add<Position>())
+                .Add(static archetype => archetype.Alias("Shared").Add<Velocity>())));
+
+            Assert.DoesNotThrow(() => _world.ReserveArchetype(1,
+                static archetype => archetype.Add<Velocity>()));
+        }
+
+        [Test]
+        public void ReserveArchetype_ShouldValidateExistingAliasBeforeCreatingArchetype()
+        {
+            _world.ReserveArchetype(1, static archetype => archetype
+                .Alias("Existing")
+                .Add<Position>());
+
+            Assert.Throws<InvalidOperationException>(() => _world.ReserveArchetype(1,
+                static archetype => archetype.Alias("Existing").Add<Velocity>()));
+            Assert.DoesNotThrow(() => _world.ReserveArchetype(1,
+                static archetype => archetype.Add<Velocity>()));
+        }
+
+        [Test]
         public void ReserveArchetypeGroup_WithMoreThanFiveComponents_ShouldCreateOnlyCompletedLayout()
         {
             var created = new List<string>();
@@ -3530,6 +3554,20 @@ namespace LitheEcs.Tests
             Assert.That(listText, Does.Contain("EntityListDiagnosticsSnapshot { Entities: 2 }"));
             Assert.That(listText, Does.Contain(snapshot.FormatEntity(snapshot.Entities[0])));
             Assert.That(listText, Does.Contain(snapshot.FormatEntity(snapshot.Entities[1])));
+        }
+
+        [Test]
+        public void ReserveArchetypeAlias_ShouldBeCapturedByEntityDiagnosticsSnapshot()
+        {
+            _world.ReserveArchetype(1, static archetype => archetype
+                .Alias("Agents")
+                .Add<Position>());
+
+            var entity = _world.Spawn();
+            entity.Add(new Position());
+            var snapshot = _world.CreateEntityDiagnosticsSnapshot();
+
+            Assert.That(snapshot.Entities[0].ArchetypeAlias, Is.EqualTo("Agents"));
         }
 
         [Test]

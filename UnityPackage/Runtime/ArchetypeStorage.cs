@@ -291,6 +291,7 @@ namespace LitheEcs
         private readonly int _index;
         internal int Index => _index;
         internal readonly int[] TypeIds;
+        internal string? Alias;
         internal readonly List<ArchetypeChunk> Chunks;
         internal int EntityCount;
         internal int ContentVersion;
@@ -691,6 +692,9 @@ namespace LitheEcs
             ArchetypeCreated?.Invoke(archetype);
             return archetype;
         }
+
+        internal bool TryGet(int[] sortedTypeIds, out Archetype archetype) =>
+            _byKey.TryGetValue(new ArchetypeKey(sortedTypeIds), out archetype!);
 
         internal Archetype With(Archetype source, int typeId)
         {

@@ -1,0 +1,21 @@
+{
+    "name": "LitheEcs.EntityVisualize.Editor",
+    "rootNamespace": "",
+    "references": [
+        "LitheEcs",
+        "LitheEcs.EntityVisualize"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "!DISABLE_LITHEECS_DIAGNOSTICS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
