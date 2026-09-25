@@ -289,7 +289,7 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
         private string FormatArchetype(in EntityDiagnostics entity)
         {
             if (entity.ArchetypeIndex < 0) return "Archetype: <Empty>";
-            if (!string.IsNullOrEmpty(entity.ArchetypeAlias)) return entity.ArchetypeAlias;
+            if (!string.IsNullOrEmpty(entity.ArchetypeName)) return entity.ArchetypeName;
             var typeIds = _snapshot.GetComponentTypeIds(entity);
             _entityTextBuilder.Clear();
             _entityTextBuilder.Append("Archetype: ");

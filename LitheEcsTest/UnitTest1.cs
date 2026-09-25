@@ -2932,27 +2932,19 @@ namespace LitheEcs.Tests
         }
 
         [Test]
-        public void ReserveArchetypeGroup_ShouldValidateAliasesBeforeReservingPages()
+        public void ReserveArchetypeGroup_ShouldAllowDuplicateNames()
         {
-            Assert.Throws<InvalidOperationException>(() => _world.ReserveArchetypeGroup(1, static group => group
-                .Add(static archetype => archetype.Alias("Shared").Add<Position>())
-                .Add(static archetype => archetype.Alias("Shared").Add<Velocity>())));
-
-            Assert.DoesNotThrow(() => _world.ReserveArchetype(1,
-                static archetype => archetype.Add<Velocity>()));
+            Assert.DoesNotThrow(() => _world.ReserveArchetypeGroup(1, static group => group
+                .Add(static archetype => archetype.Name("Shared").Add<Position>())
+                .Add(static archetype => archetype.Name("Shared").Add<Velocity>())));
         }
 
         [Test]
-        public void ReserveArchetype_ShouldValidateExistingAliasBeforeCreatingArchetype()
+        public void ReserveArchetype_ShouldAllowDuplicateNamesAcrossLayouts()
         {
-            _world.ReserveArchetype(1, static archetype => archetype
-                .Alias("Existing")
-                .Add<Position>());
-
-            Assert.Throws<InvalidOperationException>(() => _world.ReserveArchetype(1,
-                static archetype => archetype.Alias("Existing").Add<Velocity>()));
+            _world.ReserveArchetype(1, static archetype => archetype.Name("Shared").Add<Position>());
             Assert.DoesNotThrow(() => _world.ReserveArchetype(1,
-                static archetype => archetype.Add<Velocity>()));
+                static archetype => archetype.Name("Shared").Add<Velocity>()));
         }
 
         [Test]
@@ -3557,17 +3549,17 @@ namespace LitheEcs.Tests
         }
 
         [Test]
-        public void ReserveArchetypeAlias_ShouldBeCapturedByEntityDiagnosticsSnapshot()
+        public void ReserveArchetypeName_ShouldBeCapturedByEntityDiagnosticsSnapshot()
         {
             _world.ReserveArchetype(1, static archetype => archetype
-                .Alias("Agents")
+                .Name("Agents")
                 .Add<Position>());
 
             var entity = _world.Spawn();
             entity.Add(new Position());
             var snapshot = _world.CreateEntityDiagnosticsSnapshot();
 
-            Assert.That(snapshot.Entities[0].ArchetypeAlias, Is.EqualTo("Agents"));
+            Assert.That(snapshot.Entities[0].ArchetypeName, Is.EqualTo("Agents"));
         }
 
         [Test]

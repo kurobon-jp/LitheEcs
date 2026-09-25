@@ -2289,7 +2289,7 @@ namespace LitheEcs
     {
         private readonly World _world;
         private ComponentMask _componentMask;
-        private string? _alias;
+        private string? _name;
 
         internal ArchetypeBuilder(World world)
         {
@@ -2303,16 +2303,16 @@ namespace LitheEcs
             return this;
         }
 
-        /// <summary>Assigns an optional display alias to the configured Archetype.</summary>
-        public ArchetypeBuilder Alias(string alias)
+        /// <summary>Assigns an optional display name to the configured Archetype.</summary>
+        public ArchetypeBuilder Name(string name)
         {
-            if (string.IsNullOrWhiteSpace(alias)) throw new ArgumentException("Alias cannot be empty.", nameof(alias));
-            _alias = alias.Trim();
+            if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Name cannot be empty.", nameof(name));
+            _name = name.Trim();
             return this;
         }
 
         internal int[] GetTypeIds() => _componentMask.ToTypeIds();
-        internal string? GetAlias() => _alias;
+        internal string? GetName() => _name;
     }
 
     /// <summary>Collects Archetype layouts that share one total reserved capacity.</summary>
@@ -2320,7 +2320,7 @@ namespace LitheEcs
     {
         private readonly World _world;
         private readonly List<int[]> _layouts = new List<int[]>();
-        private readonly List<string?> _aliases = new List<string?>();
+        private readonly List<string?> _names = new List<string?>();
         private ComponentMask _componentMask;
         private int[]? _commonTypeIds;
 
@@ -2362,24 +2362,17 @@ namespace LitheEcs
             if (_commonTypeIds == null && configured.Length == 0)
                 throw new InvalidOperationException("At least one component type is required per Archetype.");
             var layout = _commonTypeIds == null ? configured : MergeTypeIds(_commonTypeIds, configured);
-            AddCompletedLayout(layout, builder.GetAlias());
+            AddCompletedLayout(layout, builder.GetName());
             return this;
         }
 
-        private void AddCompletedLayout(int[] layout, string? alias)
+        private void AddCompletedLayout(int[] layout, string? name)
         {
             for (var i = 0; i < _layouts.Count; i++)
                 if (LayoutsEqual(_layouts[i], layout))
                     throw new InvalidOperationException("The same Archetype layout was added more than once.");
-            if (alias != null)
-            {
-                for (var i = 0; i < _aliases.Count; i++)
-                    if (string.Equals(_aliases[i], alias, StringComparison.Ordinal))
-                        throw new InvalidOperationException($"Archetype alias '{alias}' is already in use.");
-                _world.ValidateArchetypeAlias(layout, alias);
-            }
             _layouts.Add(layout);
-            _aliases.Add(alias);
+            _names.Add(name);
             for (var i = 0; i < layout.Length; i++) _componentMask.Set(layout[i]);
         }
 
@@ -2414,7 +2407,7 @@ namespace LitheEcs
         }
 
         internal List<int[]> Layouts => _layouts;
-        internal List<string?> Aliases => _aliases;
+        internal List<string?> Names => _names;
         internal int[] GetSharedTypeIds() => _componentMask.ToTypeIds();
     }
 
@@ -2639,14 +2632,14 @@ namespace LitheEcs
     public readonly struct EntityDiagnostics
     {
         internal EntityDiagnostics(in Entity entity, int componentStartIndex, int componentCount,
-            int componentMaskHash, int archetypeIndex, string? archetypeAlias)
+            int componentMaskHash, int archetypeIndex, string? archetypeName)
         {
             Entity = entity;
             ComponentStartIndex = componentStartIndex;
             ComponentCount = componentCount;
             ComponentMaskHash = componentMaskHash;
             ArchetypeIndex = archetypeIndex;
-            ArchetypeAlias = archetypeAlias;
+            ArchetypeName = archetypeName;
         }
 
         public Entity Entity { get; }
@@ -2654,7 +2647,7 @@ namespace LitheEcs
         public int ComponentCount { get; }
         public int ComponentMaskHash { get; }
         public int ArchetypeIndex { get; }
-        public string? ArchetypeAlias { get; }
+        public string? ArchetypeName { get; }
 
         public override string ToString() =>
             $"Entity {Entity.Index}:{Entity.Version} {{ Components: {ComponentCount}, MaskHash: {ComponentMaskHash:X8} }}";
@@ -3075,7 +3068,6 @@ namespace LitheEcs
         private int _freeEntityBinding = -1;
         private Dictionary<Type, IStructBindingStorage>? _structBindingStorages;
         private Dictionary<Type, ArchetypeQueryPlan>? _baseArchetypeQueryPlans;
-        private Dictionary<string, Archetype>? _archetypesByAlias;
         private List<EntityQueryPlan>? _entityQueryPlans;
         private List<IIncrementalQueryPlan>?[]? _incrementalQueryPlans;
         private CollectorRegistry? _collectors;
@@ -3472,9 +3464,8 @@ namespace LitheEcs
             var typeIds = builder.GetTypeIds();
             if (typeIds.Length == 0)
                 throw new InvalidOperationException("At least one component type is required.");
-            if (builder.GetAlias() is { } alias) ValidateArchetypeAlias(typeIds, alias);
             var archetype = _archetypes.WithMany(_archetypes.Empty, typeIds);
-            SetArchetypeAlias(archetype, builder.GetAlias());
+            SetArchetypeName(archetype, builder.GetName());
             // Dedicated Archetype storage must be added to the pool before it is rented.
             // Otherwise a later dedicated reservation can consume pages previously set
             // aside by ReserveArchetypeGroup, making the shared guarantee depend
@@ -3501,17 +3492,10 @@ namespace LitheEcs
             var layouts = builder.Layouts;
             if (layouts.Count == 0)
                 throw new InvalidOperationException("At least one Archetype layout is required.");
-            ReserveArchetypeLayouts(totalCapacity, layouts, builder.Aliases, builder.GetSharedTypeIds());
+            ReserveArchetypeLayouts(totalCapacity, layouts, builder.Names, builder.GetSharedTypeIds());
         }
 
-        internal void ValidateArchetypeAlias(int[] typeIds, string alias)
-        {
-            if (_archetypesByAlias == null || !_archetypesByAlias.TryGetValue(alias, out var existing)) return;
-            if (_archetypes.TryGet(typeIds, out var archetype) && ReferenceEquals(existing, archetype)) return;
-            throw new InvalidOperationException($"Archetype alias '{alias}' is already in use.");
-        }
-
-        private void ReserveArchetypeLayouts(int totalCapacity, List<int[]> layouts, List<string?> aliases,
+        private void ReserveArchetypeLayouts(int totalCapacity, List<int[]> layouts, List<string?> names,
             int[] sharedTypeIds)
         {
             var layoutTypeCounts = new int[sharedTypeIds.Length];
@@ -3525,28 +3509,21 @@ namespace LitheEcs
             _archetypes.Pages.ReserveShared(
                 sharedTypeIds, layoutTypeCounts, layouts.Count, totalCapacity);
 
-            for (var i = 0; i < layouts.Count; i++) RegisterArchetype(layouts[i], aliases[i]);
+            for (var i = 0; i < layouts.Count; i++) RegisterArchetype(layouts[i], names[i]);
         }
 
-        private void RegisterArchetype(int[] typeIds, string? builderAliases)
+        private void RegisterArchetype(int[] typeIds, string? builderName)
         {
             var archetype = _archetypes.GetOrCreate(typeIds);
-            SetArchetypeAlias(archetype, builderAliases);
+            SetArchetypeName(archetype, builderName);
             archetype.EnsureChunkShellCount(_archetypes.Pages.GetSharedUsablePageCount(typeIds));
             _archetypes.WarmAddTransitionsTo(archetype);
             _archetypes.WarmRemoveTransitionsTo(archetype);
         }
 
-        private void SetArchetypeAlias(Archetype archetype, string? alias)
+        private static void SetArchetypeName(Archetype archetype, string? name)
         {
-            if (alias == null) return;
-            if (archetype.Alias != null && !string.Equals(archetype.Alias, alias, StringComparison.Ordinal))
-                throw new InvalidOperationException($"Archetype already has alias '{archetype.Alias}'.");
-            if (_archetypesByAlias != null && _archetypesByAlias.TryGetValue(alias, out var existing) &&
-                !ReferenceEquals(existing, archetype))
-                throw new InvalidOperationException($"Archetype alias '{alias}' is already in use.");
-            archetype.Alias = alias;
-            (_archetypesByAlias ??= new Dictionary<string, Archetype>(StringComparer.Ordinal))[alias] = archetype;
+            if (name != null) archetype.Name = name;
         }
 
         /// <summary>Preallocates one Relation type's forward and backward storage.</summary>
@@ -5463,7 +5440,7 @@ namespace LitheEcs
                         componentDestination - componentStart,
                         GetComponentTypeHash(typeIds),
                         location.IsValid ? location.Archetype.Index : -1,
-                        location.IsValid ? location.Archetype.Alias : null);
+                        location.IsValid ? location.Archetype.Name : null);
                 }
 
                 var componentTypesById = new Type?[ComponentTypeRegistry.Count];
