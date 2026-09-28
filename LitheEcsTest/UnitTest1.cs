@@ -2932,6 +2932,22 @@ namespace LitheEcs.Tests
         }
 
         [Test]
+        public void ReserveArchetypeGroup_ShouldAllowDuplicateNames()
+        {
+            Assert.DoesNotThrow(() => _world.ReserveArchetypeGroup(1, static group => group
+                .Add(static archetype => archetype.Name("Shared").Add<Position>())
+                .Add(static archetype => archetype.Name("Shared").Add<Velocity>())));
+        }
+
+        [Test]
+        public void ReserveArchetype_ShouldAllowDuplicateNamesAcrossLayouts()
+        {
+            _world.ReserveArchetype(1, static archetype => archetype.Name("Shared").Add<Position>());
+            Assert.DoesNotThrow(() => _world.ReserveArchetype(1,
+                static archetype => archetype.Name("Shared").Add<Velocity>()));
+        }
+
+        [Test]
         public void ReserveArchetypeGroup_WithMoreThanFiveComponents_ShouldCreateOnlyCompletedLayout()
         {
             var created = new List<string>();
@@ -3530,6 +3546,20 @@ namespace LitheEcs.Tests
             Assert.That(listText, Does.Contain("EntityListDiagnosticsSnapshot { Entities: 2 }"));
             Assert.That(listText, Does.Contain(snapshot.FormatEntity(snapshot.Entities[0])));
             Assert.That(listText, Does.Contain(snapshot.FormatEntity(snapshot.Entities[1])));
+        }
+
+        [Test]
+        public void ReserveArchetypeName_ShouldBeCapturedByEntityDiagnosticsSnapshot()
+        {
+            _world.ReserveArchetype(1, static archetype => archetype
+                .Name("Agents")
+                .Add<Position>());
+
+            var entity = _world.Spawn();
+            entity.Add(new Position());
+            var snapshot = _world.CreateEntityDiagnosticsSnapshot();
+
+            Assert.That(snapshot.Entities[0].ArchetypeName, Is.EqualTo("Agents"));
         }
 
         [Test]

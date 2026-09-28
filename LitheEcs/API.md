@@ -106,7 +106,22 @@ When runtime validation is compiled in, using a `Ref<T>` after a structural chan
 same component type throws `InvalidOperationException`. In all configurations, do not retain
 component references across component additions or removals, despawns, or storage growth.
 
-## 4. Queries
+## 4. Archetype reservations and names
+
+`ReserveArchetype` and `ReserveArchetypeGroup` preallocate storage for known component layouts.
+An optional display name can be assigned to each layout:
+
+```csharp
+world.ReserveArchetype(128, archetype => archetype
+    .Name("Enemies")
+    .Add<Position>()
+    .Add<Health>());
+```
+
+Names are display labels and may be reused by multiple layouts within a World. `ArchetypeName` and
+`ArchetypeIndex` are included in diagnostics snapshots.
+
+## 5. Queries
 
 ### Iteration
 
@@ -202,7 +217,7 @@ if (world.Query<Position, Velocity>().TryGetAlignedChunk(out var chunk))
 }
 ```
 
-## 5. JobQuery and Unity Burst
+## 6. JobQuery and Unity Burst
 
 `AsJobQuery()` restricts projected components to `unmanaged` types and exposes synchronous leases:
 
@@ -248,7 +263,7 @@ public struct MovementAction : IBurstQueryAction<Position, Velocity>
 dependency checks. Do not access the same columns concurrently or retain pointers or JobHandles
 outside the synchronous call.
 
-## 6. Managed parallel queries
+## 7. Managed parallel queries
 
 Queries with one through eight components can run ranges on persistent World-owned workers:
 
@@ -282,7 +297,7 @@ not stable between executions.
   only the calling thread; larger runs activate about one thread per 8,192 entities, capped by the
   logical processor count.
 
-## 7. EntityCommandBuffer
+## 8. EntityCommandBuffer
 
 Each World owns one reusable, single-owner-thread command buffer:
 
@@ -311,7 +326,7 @@ command order as individual calls.
 - Playback is not transactional; already applied commands are not rolled back.
 - Spawn callbacks run during playback.
 
-## 8. EntityTemplate
+## 9. EntityTemplate
 
 An `EntityTemplate` is a reusable component layout with default values:
 
@@ -328,7 +343,7 @@ template.SpawnBatch(1_000);
 Adding the same component type replaces its template value. Singleton components cannot be
 batch-added to multiple entities.
 
-## 9. Singleton entities
+## 10. Singleton entities
 
 Singleton marker components implement `ISingleton`:
 
@@ -346,7 +361,7 @@ bool found = world.TryGetSingleton<GameSettings>(out Entity entity);
 Adding the same singleton type to multiple entities in one World throws
 `InvalidOperationException`. The entity is singleton; regular components attached to it are not.
 
-## 10. Managed references and bindings
+## 11. Managed references and bindings
 
 `Link<T>` stores a managed reference as a component:
 
@@ -372,7 +387,7 @@ entity.Unbind(gameObject);
 The same reference or equal value cannot be bound to multiple entities in one World. Bindings are
 removed on despawn. Link and Bind are separate features.
 
-## 11. Relations
+## 12. Relations
 
 A relation type is a struct used as a type identifier:
 
@@ -394,7 +409,7 @@ zero or multiple targets, `GetRelation<T>()` throws and `TryGetRelation<T>()` re
 the same World. Despawning either removes the relation. Relations use separate storage from
 components.
 
-## 12. Reactive EntityCollector
+## 13. Reactive EntityCollector
 
 A collector records component events since its last `Clear()`; it is not a view of current state.
 
@@ -431,7 +446,7 @@ foreach (var entity in collector)
         Process(entity);
 ```
 
-## 13. Structural batching and diagnostics
+## 14. Structural batching and diagnostics
 
 `BeginStructuralBatch()` combines a sequence of direct structural operations into one deferred
 flush boundary. Dispose the returned scope before querying or otherwise consuming the final
@@ -476,7 +491,7 @@ removed independently by defining these symbols:
 These symbols are useful in environments that do not define `RELEASE` but still require the
 lower-overhead build. Define them for every assembly compilation that includes the LitheEcs source.
 
-## 14. Errors and lifetime rules
+## 15. Errors and lifetime rules
 
 - Passing an entity from another World generally throws `InvalidOperationException`.
 - Instance operations on `default(Entity)` throw because it has no World.
@@ -485,7 +500,7 @@ lower-overhead build. Define them for every assembly compilation that includes t
 - Do not retain component references or relation spans across structural changes to their backing
   storage.
 
-## 15. Verification
+## 16. Verification
 
 ```shell
 dotnet test LitheEcs.sln --no-restore --configuration Release
