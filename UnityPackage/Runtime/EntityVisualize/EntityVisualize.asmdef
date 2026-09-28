@@ -13,6 +13,7 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [
+        "!RELEASE",
         "!DISABLE_LITHEECS_DIAGNOSTICS"
     ],
     "versionDefines": [],

@@ -34,6 +34,8 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
         {
             EntityVisualizer.OnRegistered -= OnWorldRegistered;
             EntityVisualizer.OnRegistered += OnWorldRegistered;
+            EntityVisualizer.OnUnregistered -= OnWorldUnregistered;
+            EntityVisualizer.OnUnregistered += OnWorldUnregistered;
             EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
         }
@@ -41,6 +43,7 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
         private void OnDisable()
         {
             EntityVisualizer.OnRegistered -= OnWorldRegistered;
+            EntityVisualizer.OnUnregistered -= OnWorldUnregistered;
             EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
         }
 
@@ -105,23 +108,40 @@ namespace LitheEcs.Unity.EntityVisualize.Editor
         {
             if (_toolbarMenu == null) return;
             _toolbarMenu.menu.ClearItems();
+            if (_selectedWorld != null && !EntityVisualizer.Worlds.ContainsValue(_selectedWorld))
+                _selectedWorld = null;
+
             foreach (var pair in EntityVisualizer.Worlds)
             {
-                OnWorldRegistered(pair.Key, pair.Value);
+                if (_selectedWorld == null) _selectedWorld = pair.Value;
+                var status = ReferenceEquals(_selectedWorld, pair.Value)
+                    ? DropdownMenuAction.Status.Checked
+                    : DropdownMenuAction.Status.Normal;
+                _toolbarMenu.menu.AppendAction(pair.Key, _ => { OnSwitchWorld(pair.Value); }, status: status);
             }
         }
 
         private void OnWorldRegistered(string name, World world)
         {
             if (_toolbarMenu == null) return;
-            var status = DropdownMenuAction.Status.Normal;
-            if (_toolbarMenu.menu.MenuItems().Count == 0)
+            OnPlayEditor();
+        }
+
+        private void OnWorldUnregistered(string name, World world)
+        {
+            if (_toolbarMenu == null) return;
+            if (ReferenceEquals(_selectedWorld, world) && !EntityVisualizer.Worlds.ContainsValue(world))
             {
-                status = DropdownMenuAction.Status.Checked;
-                _selectedWorld = world;
+                _selectedWorld = null;
+                _snapshot = null;
+                _snapshotWorld = null;
+                _snapshotStructuralVersion = -1;
+                SelectedEntity = default;
+                Selection.activeObject = null;
+                _filterDirty = true;
             }
 
-            _toolbarMenu.menu.AppendAction(name, _ => { OnSwitchWorld(world); }, status: status);
+            OnPlayEditor();
         }
 
         private void OnDoubleClick()
