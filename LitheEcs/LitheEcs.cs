@@ -2270,6 +2270,11 @@ namespace LitheEcs
                 RecordComponentBatch(entities, component);
                 return;
             }
+            if (IsOwnerThread)
+            {
+                RecordComponentBatch(entities, component);
+                return;
+            }
             lock (_sync)
             {
                 RecordComponentBatch(entities, component);
@@ -2311,6 +2316,18 @@ namespace LitheEcs
                 return;
             }
             if (_isParallelLane)
+            {
+                ValidateWorld(entity);
+                var buffer = GetOrCreateComponentBuffer<T>();
+                RecordCommand(new Command
+                {
+                    Kind = CommandKind.KeyRemove,
+                    Target = entity,
+                    ComponentBuffer = buffer,
+                });
+                return;
+            }
+            if (IsOwnerThread)
             {
                 ValidateWorld(entity);
                 var buffer = GetOrCreateComponentBuffer<T>();
@@ -2748,7 +2765,7 @@ namespace LitheEcs
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void RecordCommand(in Command command)
         {
-            if (_isParallelLane)
+            if (_isParallelLane || IsOwnerThread)
             {
 #if _INTERNAL_DERIVED_USE_DIAGNOSTICS
                 if (_allocationDiagnostics.Enabled && _commands.Count == _commands.Capacity)
@@ -2766,6 +2783,8 @@ namespace LitheEcs
                 _commands.Add(command);
             }
         }
+
+        private bool IsOwnerThread => Environment.CurrentManagedThreadId == _ownerThreadId;
 
         private void ValidateDeferred(in DeferredEntity entity)
         {
@@ -2786,7 +2805,7 @@ namespace LitheEcs
 
         private ComponentCommandBuffer<T> GetOrCreateComponentBuffer<T>() where T : struct
         {
-            if (_isParallelLane) return GetOrCreateComponentBufferCore<T>();
+            if (_isParallelLane || IsOwnerThread) return GetOrCreateComponentBufferCore<T>();
             lock (_sync)
             {
                 return GetOrCreateComponentBufferCore<T>();
