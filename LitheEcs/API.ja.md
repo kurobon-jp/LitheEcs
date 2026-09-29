@@ -380,7 +380,10 @@ world.Query<Position>().AsParallelQuery().Run((positions, entities) =>
 - callbackごとに、異なるEntityのComponentを処理します。
 - 同じWorldでは、複数の`ParallelQuery.Run`を同時に実行したり、処理をネストしたりできません。
 - 実行中にSpawn、Despawn、Componentの追加・削除を行うと`InvalidOperationException`が発生します。並列処理内で発生した例外は`AggregateException`にまとめられます。
-- `EntityCommandBuffer`は所有thread専用のため、Parallel workerからコマンドを記録できません。構造変更の要求はthread-safeな方法で収集し、`ParallelQuery.Run`の完了後に所有threadから記録して`Playback()`してください。
+- `EntityRange.CommandBuffer`から構造変更を記録できます。`EntityCommandBuffer`への記録は複数threadから安全に行えますが、`Playback()`はWorldを所有するthreadから、`ParallelQuery.Run`完了後に呼び出してください。
+- `EntityRange.CommandBuffer.Spawn()`が返す`DeferredEntity`は、同じRangeのcommand bufferでComponent追加やRelation追加に使用できます。
+- Parallel worker間のcommand記録順は保証されません。同じEntityへ複数Rangeから競合するcommandを記録しないでください。
+- validation有効時は、複数Rangeから同じEntityへ構造変更commandを記録すると`Playback()`で例外になります。
 - callbackから共有状態へアクセスする場合は、利用者側で同期してください。複数のEntityから同じ変数や同じComponentへ同時に書き込まないでください。
 - Entity数が`minimumEntityCount`未満の場合は、呼び出し元のthreadで逐次実行します。既定値は4,096です。
 - `Reserve(maximumEntityCount)`はwork rangeに加え、現在Queryに一致するArchetypeのmetadataも
@@ -440,7 +443,7 @@ if (world.Query<Position, Velocity>().TryGetAlignedChunk(out var chunk))
 var ecb = world.CommandBuffer;
 ```
 
-`EntityCommandBuffer`は、それを所有するthread専用です。別のthreadからコマンドを記録したり`Playback()`を呼び出したりすると、`InvalidOperationException`が発生します。現在、複数threadから共有できる`EntityCommandBuffer`は提供していません。
+`EntityCommandBuffer`へのコマンド記録は複数threadから安全に行えます。`Playback()`は作成元thread専用です。
 
 対応コマンド:
 

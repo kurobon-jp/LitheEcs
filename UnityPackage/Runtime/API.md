@@ -285,7 +285,10 @@ not stable between executions.
 - Parallel queries cannot be nested or run concurrently on the same World.
 - Structural changes during execution throw `InvalidOperationException`.
 - Worker exceptions are returned in an `AggregateException`.
-- The ECB is owner-thread-only. Collect requests safely and record them after `Run()` returns.
+- `EntityRange.CommandBuffer` can record structural changes from parallel workers. Recording is thread-safe, but `Playback()` must be called from the World owner thread after `Run()` returns.
+- A `DeferredEntity` returned by `EntityRange.CommandBuffer.Spawn()` can be used with that same range command buffer, including component and relation commands.
+- Command order between parallel workers is not guaranteed. Do not record conflicting commands for the same Entity from multiple ranges.
+- With validation enabled, conflicting structural commands targeting the same Entity from multiple ranges throw during `Playback()`.
 - Users must synchronize captured shared state.
 - Below `minimumEntityCount`, execution is sequential. Its default is 4,096.
 - `Reserve(maximumEntityCount)` preallocates work ranges and metadata for archetypes that currently
@@ -299,7 +302,7 @@ not stable between executions.
 
 ## 8. EntityCommandBuffer
 
-Each World owns one reusable, single-owner-thread command buffer:
+Each World owns one reusable command buffer. Recording is thread-safe; Playback is restricted to the World owner thread:
 
 ```csharp
 var ecb = world.CommandBuffer;

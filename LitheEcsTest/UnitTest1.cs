@@ -726,6 +726,10 @@ namespace LitheEcs.Tests
             var targets = new Entity[count];
             world.SpawnBatch(count, targets);
 
+            // Warm the generic relation path before measuring steady-state allocations.
+            source.AddRelation<FriendsWith>(targets[0]);
+            Assert.That(source.RemoveRelation<FriendsWith>(targets[0]), Is.True);
+
             var before = GC.GetAllocatedBytesForCurrentThread();
             for (var i = 0; i < count; i++) source.AddRelation<FriendsWith>(targets[i]);
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -2022,14 +2026,13 @@ namespace LitheEcs.Tests
         }
 
         [Test]
-        public void EntityCommandBuffer_ShouldRejectUseFromAnotherThread()
+        public void EntityCommandBuffer_ShouldAllowRecordingFromAnotherThread()
         {
             var ecb = _world.CommandBuffer;
 
-            var exception = Assert.Throws<InvalidOperationException>(() =>
+            Assert.DoesNotThrow(() =>
                 System.Threading.Tasks.Task.Run(() => ecb.Spawn()).GetAwaiter().GetResult());
-
-            Assert.That(exception!.Message, Does.Contain("thread that created it"));
+            Assert.DoesNotThrow(() => ecb.Playback());
         }
 
         [Test]
@@ -2125,7 +2128,7 @@ namespace LitheEcs.Tests
         [Test]
         public void CommandBufferReservePayload_ShouldAvoidTypedPayloadAllocations()
         {
-            const int count = 256;
+            const int count = 32768;
             var entities = new Entity[count];
             _world.SpawnBatch(count, entities);
             _world.ReserveArchetype(count, static archetype => archetype.Add<Position>());
@@ -2149,7 +2152,7 @@ namespace LitheEcs.Tests
         [Test]
         public void CommandBufferReserve_ShouldAvoidDeferredEntityRecordingAllocations()
         {
-            const int count = 256;
+            const int count = 32768;
             using var world = new World(count);
             world.ReserveArchetype(count, static archetype => archetype.Add<Position>());
             var ecb = world.CommandBuffer;
@@ -3161,6 +3164,286 @@ namespace LitheEcs.Tests
             Assert.That(count, Is.EqualTo(128));
             Assert.That(entitiesByQueryOffset, Has.None.EqualTo(-1));
             Assert.That(entitiesByQueryOffset.Distinct().Count(), Is.EqualTo(128));
+        }
+
+        [Test]
+        public void ParallelForRanges_ShouldRecordStructuralCommandsThroughEntityRangeCommandBuffer()
+        {
+            var ecb = _world.CommandBuffer;
+            for (var i = 0; i < 128; i++)
+            {
+                var entity = _world.Spawn();
+                entity.Add(new Position(i, 0, 0));
+            }
+
+            _world.Query<Position>().AsParallelQuery(1_000_000, 8).Run((positions, entities) =>
+            {
+                for (var i = 0; i < positions.Length; i++)
+                    if ((entities[i].Index & 1) == 0)
+                        entities.CommandBuffer.Despawn(entities[i]);
+            });
+
+            Assert.DoesNotThrow(() => ecb.Playback());
+
+            var remaining = 0;
+            _world.Query<Position>().ForEach((in Entity _, ref Position _) => remaining++);
+            Assert.That(remaining, Is.EqualTo(64));
+        }
+
+        [Test]
+        public void ParallelForRanges_ShouldReuseLanesForAddAndRemoveCommands()
+        {
+            for (var i = 0; i < 128; i++)
+            {
+                var entity = _world.Spawn();
+                entity.Add(new Position(i, 0, 0));
+            }
+
+            var query = _world.Query<Position>().AsParallelQuery(1, 8);
+            query.Run((positions, entities) =>
+            {
+                for (var i = 0; i < positions.Length; i++)
+                    entities.CommandBuffer.AddComponent(entities[i], new Health(1));
+            });
+            _world.CommandBuffer.Playback();
+
+            var added = 0;
+            _world.Query<Health>().ForEach((in Entity _, ref Health _) => added++);
+            Assert.That(added, Is.EqualTo(128));
+
+            query.Run((positions, entities) =>
+            {
+                for (var i = 0; i < positions.Length; i++)
+                    entities.CommandBuffer.RemoveComponent<Health>(entities[i]);
+            });
+            _world.CommandBuffer.Playback();
+
+            var removed = 0;
+            _world.Query<Health>().ForEach((in Entity _, ref Health _) => removed++);
+            Assert.That(removed, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ParallelForRanges_ShouldRouteMultiComponentCommandsThroughRangeLanes()
+        {
+            for (var i = 0; i < 128; i++)
+            {
+                var entity = _world.Spawn();
+                entity.Add(new Position(i, 0, 0));
+            }
+
+            _world.Query<Position>().AsParallelQuery(1, 8).Run((positions, entities) =>
+            {
+                for (var i = 0; i < positions.Length; i++)
+                    entities.CommandBuffer.AddComponent(
+                        entities[i],
+                        new Health(entities[i].Index),
+                        new Acceleration(1, 2, 3));
+            });
+
+            _world.CommandBuffer.Playback();
+
+            var count = 0;
+            _world.Query<Health, Acceleration>().ForEach(
+                (in Entity entity, ref Health health, ref Acceleration acceleration) =>
+                {
+                    Assert.That(health.Value, Is.EqualTo(entity.Index));
+                    Assert.That(acceleration.Value, Is.EqualTo(new Vector3(1, 2, 3)));
+                    count++;
+                });
+            Assert.That(count, Is.EqualTo(128));
+        }
+
+        [Test]
+        public void ParallelForRanges_ShouldRouteRelationCommandsThroughRangeLanes()
+        {
+            for (var i = 0; i < 128; i++)
+            {
+                var entity = _world.Spawn();
+                entity.Add(new Position(i, 0, 0));
+            }
+
+            var target = _world.Spawn();
+            _world.Query<Position>().AsParallelQuery(1, 8).Run((positions, entities) =>
+            {
+                for (var i = 0; i < positions.Length; i++)
+                    entities.CommandBuffer.AddRelation<FriendsWith>(entities[i], target);
+            });
+
+            _world.CommandBuffer.Playback();
+
+            var added = 0;
+            _world.Query<Position>().ForEach((in Entity entity, ref Position _) =>
+            {
+                Assert.That(entity.HasRelation<FriendsWith>(target), Is.True);
+                added++;
+            });
+            Assert.That(added, Is.EqualTo(128));
+
+            _world.Query<Position>().AsParallelQuery(1, 8).Run((positions, entities) =>
+            {
+                for (var i = 0; i < positions.Length; i++)
+                    entities.CommandBuffer.RemoveRelation<FriendsWith>(entities[i], target);
+            });
+
+            _world.CommandBuffer.Playback();
+
+            var removed = 0;
+            _world.Query<Position>().ForEach((in Entity entity, ref Position _) =>
+            {
+                Assert.That(entity.HasRelation<FriendsWith>(target), Is.False);
+                removed++;
+            });
+            Assert.That(removed, Is.EqualTo(128));
+        }
+
+        [Test]
+        public void ParallelForRanges_ShouldResolveDeferredEntitiesCreatedInRangeLanes()
+        {
+            for (var i = 0; i < 128; i++)
+            {
+                var entity = _world.Spawn();
+                entity.Add(new Position(i, 0, 0));
+            }
+
+            var target = _world.Spawn();
+            _world.Query<Position>().AsParallelQuery(1, 8).Run((positions, entities) =>
+            {
+                for (var i = 0; i < positions.Length; i++)
+                {
+                    var spawned = entities.CommandBuffer.Spawn();
+                    entities.CommandBuffer.AddComponent(
+                        spawned,
+                        new Health(entities[i].Index),
+                        new Acceleration(1, 2, 3));
+                    entities.CommandBuffer.AddRelation<FriendsWith>(spawned, target);
+                }
+            });
+
+            _world.CommandBuffer.Playback();
+
+            var componentCount = 0;
+            _world.Query<Health, Acceleration>().ForEach(
+                (in Entity entity, ref Health health, ref Acceleration acceleration) =>
+                {
+                    Assert.That(health.Value, Is.GreaterThanOrEqualTo(0));
+                    Assert.That(acceleration.Value, Is.EqualTo(new Vector3(1, 2, 3)));
+                    Assert.That(entity.HasRelation<FriendsWith>(target), Is.True);
+                    componentCount++;
+                });
+            Assert.That(componentCount, Is.EqualTo(128));
+            Assert.That(_world.GetEntitiesWithTarget<FriendsWith>(target).Length, Is.EqualTo(128));
+        }
+
+        [Test]
+        public void ParallelForRanges_ShouldRejectDeferredEntitiesFromPreviousPlayback()
+        {
+            for (var i = 0; i < 128; i++)
+            {
+                var entity = _world.Spawn();
+                entity.Add(new Position(i, 0, 0));
+            }
+
+            var stale = default(DeferredEntity);
+            _world.Query<Position>().AsParallelQuery(1, 8).Run((positions, entities) =>
+            {
+                if (positions.Length != 0) stale = entities.CommandBuffer.Spawn();
+            });
+            _world.CommandBuffer.Playback();
+
+            Assert.Throws<AggregateException>(() =>
+                _world.Query<Position>().AsParallelQuery(1, 8).Run((positions, entities) =>
+                {
+                    var current = entities.CommandBuffer.Spawn();
+                    entities.CommandBuffer.AddComponent(stale, new Health(1));
+                    entities.CommandBuffer.AddComponent(current, new Health(2));
+                }));
+
+            _world.CommandBuffer.Playback();
+            var count = 0;
+            _world.Query<Health>().ForEach((in Entity _, ref Health _) => count++);
+            Assert.That(count, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ParallelForRanges_ShouldKeepLaneOwnedRecordingSafeAcrossWorkers()
+        {
+            const int count = 32768;
+
+            for (var i = 0; i < count; i++)
+            {
+                var entity = _world.Spawn();
+                entity.Add(new Position(i, 0, 0));
+            }
+
+            var target = _world.Spawn();
+            _world.Query<Position>().AsParallelQuery(1, 8).Run((positions, entities) =>
+            {
+                for (var i = 0; i < positions.Length; i++)
+                {
+                    var entity = entities[i];
+                    switch (entity.Index & 3)
+                    {
+                        case 0:
+                            entities.CommandBuffer.AddComponent(entity, new Health(entity.Index));
+                            break;
+                        case 1:
+                            entities.CommandBuffer.AddComponent(entity,
+                                new Health(entity.Index), new Acceleration(1, 2, 3));
+                            break;
+                        case 2:
+                            entities.CommandBuffer.AddRelation<FriendsWith>(entity, target);
+                            break;
+                        default:
+                            entities.CommandBuffer.Despawn(entity);
+                            break;
+                    }
+
+                    if ((entity.Index & 7) == 0)
+                    {
+                        var spawned = entities.CommandBuffer.Spawn();
+                        entities.CommandBuffer.AddComponent(spawned, new Health(entity.Index));
+                        entities.CommandBuffer.AddRelation<FriendsWith>(spawned, target);
+                    }
+                }
+            });
+
+            Assert.DoesNotThrow(() => _world.CommandBuffer.Playback());
+
+            var healthCount = 0;
+            var accelerationCount = 0;
+            var relationCount = 0;
+            var positionCount = 0;
+            _world.Query<Position>().ForEach((in Entity entity, ref Position _) =>
+            {
+                positionCount++;
+                if (entity.Has<Health>()) healthCount++;
+                if (entity.Has<Acceleration>()) accelerationCount++;
+                if (entity.HasRelation<FriendsWith>(target)) relationCount++;
+            });
+
+            Assert.That(positionCount, Is.EqualTo(24576));
+            Assert.That(healthCount, Is.EqualTo(16384));
+            Assert.That(accelerationCount, Is.EqualTo(8192));
+            Assert.That(relationCount, Is.EqualTo(8192));
+            Assert.That(_world.GetEntitiesWithTarget<FriendsWith>(target).Length, Is.EqualTo(12288));
+        }
+
+        [Test]
+        public void ParallelForRanges_ShouldDiscardLaneCommandsAfterCallbackFailure()
+        {
+            var first = _world.Spawn();
+            first.Add(new Position());
+
+            var query = _world.Query<Position>().AsParallelQuery(1, 8);
+            Assert.Throws<AggregateException>(() => query.Run((positions, entities) =>
+            {
+                entities.CommandBuffer.AddComponent(entities[0], new Health(1));
+                throw new InvalidOperationException("parallel command failure");
+            }));
+
+            _world.CommandBuffer.Playback();
+            Assert.That(first.Has<Health>(), Is.False);
         }
 
         [Test]

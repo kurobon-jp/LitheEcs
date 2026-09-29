@@ -54,11 +54,11 @@ namespace LitheEcs
         internal void ParallelForRanges(ParallelRangeAction<T1, T2> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset)); queryOffset += count; } } return; }
-            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
-        } catch (AggregateException) { throw; } catch (Exception exception) { throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
+                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset, _world.ExistingCommandBuffer)); queryOffset += count; } } return; }
+            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.CommandBuffer = _world.ExistingCommandBuffer; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
+        } catch (AggregateException) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw; } catch (Exception exception) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
         private sealed class ParallelRangeJob : ParallelQueryJob
-        { internal World World = null!;
+        { internal World World = null!; internal EntityCommandBuffer? CommandBuffer;
             internal ParallelRangeAction<T1, T2> Action = null!;
             private int[] _c1 = Array.Empty<int>();
             private int[] _c2 = Array.Empty<int>();
@@ -72,8 +72,8 @@ namespace LitheEcs
                     _c1[n] = archetype.GetColumnIndex(ComponentType<T1>.Id);
                     _c2[n] = archetype.GetColumnIndex(ComponentType<T2>.Id);
                 } }
-            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start;
-                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset)); } }
+            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start; EntityCommandBuffer.BeginParallelCallback(); var commandBuffer = CommandBuffer ?? World.ExistingCommandBuffer; var recordingTarget = commandBuffer; if (commandBuffer != null) { EntityCommandBuffer.EnterParallelRecording(commandBuffer); recordingTarget = commandBuffer.GetParallelRecordingTarget(); } try {
+                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset, recordingTarget)); } finally { EntityCommandBuffer.EndParallelCallback(); } } }
         public ref struct Enumerator
         { private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
           private T1[]? _d1;
@@ -179,11 +179,11 @@ namespace LitheEcs
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset)); queryOffset += count; } } return; }
-            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
-        } catch (AggregateException) { throw; } catch (Exception exception) { throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
+                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset, _world.ExistingCommandBuffer)); queryOffset += count; } } return; }
+            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.CommandBuffer = _world.ExistingCommandBuffer; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
+        } catch (AggregateException) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw; } catch (Exception exception) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
         private sealed class ParallelRangeJob : ParallelQueryJob
-        { internal World World = null!;
+        { internal World World = null!; internal EntityCommandBuffer? CommandBuffer;
             internal ParallelRangeAction<T1, T2, T3> Action = null!;
             private int[] _c1 = Array.Empty<int>();
             private int[] _c2 = Array.Empty<int>();
@@ -200,8 +200,8 @@ namespace LitheEcs
                     _c2[n] = archetype.GetColumnIndex(ComponentType<T2>.Id);
                     _c3[n] = archetype.GetColumnIndex(ComponentType<T3>.Id);
                 } }
-            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start;
-                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset)); } }
+            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start; EntityCommandBuffer.BeginParallelCallback(); var commandBuffer = CommandBuffer ?? World.ExistingCommandBuffer; var recordingTarget = commandBuffer; if (commandBuffer != null) { EntityCommandBuffer.EnterParallelRecording(commandBuffer); recordingTarget = commandBuffer.GetParallelRecordingTarget(); } try {
+                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset, recordingTarget)); } finally { EntityCommandBuffer.EndParallelCallback(); } } }
         public ref struct Enumerator
         { private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
           private T1[]? _d1;
@@ -302,11 +302,11 @@ namespace LitheEcs
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3, T4> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), archetype.GetColumn<T4>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset)); queryOffset += count; } } return; }
-            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
-        } catch (AggregateException) { throw; } catch (Exception exception) { throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
+                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), archetype.GetColumn<T4>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset, _world.ExistingCommandBuffer)); queryOffset += count; } } return; }
+            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.CommandBuffer = _world.ExistingCommandBuffer; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
+        } catch (AggregateException) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw; } catch (Exception exception) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
         private sealed class ParallelRangeJob : ParallelQueryJob
-        { internal World World = null!;
+        { internal World World = null!; internal EntityCommandBuffer? CommandBuffer;
             internal ParallelRangeAction<T1, T2, T3, T4> Action = null!;
             private int[] _c1 = Array.Empty<int>();
             private int[] _c2 = Array.Empty<int>();
@@ -326,8 +326,8 @@ namespace LitheEcs
                     _c3[n] = archetype.GetColumnIndex(ComponentType<T3>.Id);
                     _c4[n] = archetype.GetColumnIndex(ComponentType<T4>.Id);
                 } }
-            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start;
-                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T4>(chunk, _c4[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset)); } }
+            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start; EntityCommandBuffer.BeginParallelCallback(); var commandBuffer = CommandBuffer ?? World.ExistingCommandBuffer; var recordingTarget = commandBuffer; if (commandBuffer != null) { EntityCommandBuffer.EnterParallelRecording(commandBuffer); recordingTarget = commandBuffer.GetParallelRecordingTarget(); } try {
+                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T4>(chunk, _c4[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset, recordingTarget)); } finally { EntityCommandBuffer.EndParallelCallback(); } } }
         public ref struct Enumerator
         { private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
           private T1[]? _d1;
@@ -443,11 +443,11 @@ namespace LitheEcs
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3, T4, T5> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), archetype.GetColumn<T4>(chunk).AsSpan(0, count), archetype.GetColumn<T5>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset)); queryOffset += count; } } return; }
-            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
-        } catch (AggregateException) { throw; } catch (Exception exception) { throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
+                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), archetype.GetColumn<T4>(chunk).AsSpan(0, count), archetype.GetColumn<T5>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset, _world.ExistingCommandBuffer)); queryOffset += count; } } return; }
+            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.CommandBuffer = _world.ExistingCommandBuffer; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
+        } catch (AggregateException) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw; } catch (Exception exception) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
         private sealed class ParallelRangeJob : ParallelQueryJob
-        { internal World World = null!;
+        { internal World World = null!; internal EntityCommandBuffer? CommandBuffer;
             internal ParallelRangeAction<T1, T2, T3, T4, T5> Action = null!;
             private int[] _c1 = Array.Empty<int>();
             private int[] _c2 = Array.Empty<int>();
@@ -470,8 +470,8 @@ namespace LitheEcs
                     _c4[n] = archetype.GetColumnIndex(ComponentType<T4>.Id);
                     _c5[n] = archetype.GetColumnIndex(ComponentType<T5>.Id);
                 } }
-            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start;
-                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T4>(chunk, _c4[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T5>(chunk, _c5[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset)); } }
+            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start; EntityCommandBuffer.BeginParallelCallback(); var commandBuffer = CommandBuffer ?? World.ExistingCommandBuffer; var recordingTarget = commandBuffer; if (commandBuffer != null) { EntityCommandBuffer.EnterParallelRecording(commandBuffer); recordingTarget = commandBuffer.GetParallelRecordingTarget(); } try {
+                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T4>(chunk, _c4[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T5>(chunk, _c5[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset, recordingTarget)); } finally { EntityCommandBuffer.EndParallelCallback(); } } }
         public ref struct Enumerator
         { private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
           private T1[]? _d1;
@@ -596,11 +596,11 @@ namespace LitheEcs
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3, T4, T5, T6> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), archetype.GetColumn<T4>(chunk).AsSpan(0, count), archetype.GetColumn<T5>(chunk).AsSpan(0, count), archetype.GetColumn<T6>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset)); queryOffset += count; } } return; }
-            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
-        } catch (AggregateException) { throw; } catch (Exception exception) { throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
+                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), archetype.GetColumn<T4>(chunk).AsSpan(0, count), archetype.GetColumn<T5>(chunk).AsSpan(0, count), archetype.GetColumn<T6>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset, _world.ExistingCommandBuffer)); queryOffset += count; } } return; }
+            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.CommandBuffer = _world.ExistingCommandBuffer; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
+        } catch (AggregateException) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw; } catch (Exception exception) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
         private sealed class ParallelRangeJob : ParallelQueryJob
-        { internal World World = null!;
+        { internal World World = null!; internal EntityCommandBuffer? CommandBuffer;
             internal ParallelRangeAction<T1, T2, T3, T4, T5, T6> Action = null!;
             private int[] _c1 = Array.Empty<int>();
             private int[] _c2 = Array.Empty<int>();
@@ -626,8 +626,8 @@ namespace LitheEcs
                     _c5[n] = archetype.GetColumnIndex(ComponentType<T5>.Id);
                     _c6[n] = archetype.GetColumnIndex(ComponentType<T6>.Id);
                 } }
-            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start;
-                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T4>(chunk, _c4[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T5>(chunk, _c5[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T6>(chunk, _c6[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset)); } }
+            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start; EntityCommandBuffer.BeginParallelCallback(); var commandBuffer = CommandBuffer ?? World.ExistingCommandBuffer; var recordingTarget = commandBuffer; if (commandBuffer != null) { EntityCommandBuffer.EnterParallelRecording(commandBuffer); recordingTarget = commandBuffer.GetParallelRecordingTarget(); } try {
+                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T4>(chunk, _c4[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T5>(chunk, _c5[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T6>(chunk, _c6[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset, recordingTarget)); } finally { EntityCommandBuffer.EndParallelCallback(); } } }
         public ref struct Enumerator
         { private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
           private T1[]? _d1;
@@ -761,11 +761,11 @@ namespace LitheEcs
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3, T4, T5, T6, T7> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), archetype.GetColumn<T4>(chunk).AsSpan(0, count), archetype.GetColumn<T5>(chunk).AsSpan(0, count), archetype.GetColumn<T6>(chunk).AsSpan(0, count), archetype.GetColumn<T7>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset)); queryOffset += count; } } return; }
-            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
-        } catch (AggregateException) { throw; } catch (Exception exception) { throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
+                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), archetype.GetColumn<T4>(chunk).AsSpan(0, count), archetype.GetColumn<T5>(chunk).AsSpan(0, count), archetype.GetColumn<T6>(chunk).AsSpan(0, count), archetype.GetColumn<T7>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset, _world.ExistingCommandBuffer)); queryOffset += count; } } return; }
+            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.CommandBuffer = _world.ExistingCommandBuffer; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
+        } catch (AggregateException) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw; } catch (Exception exception) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
         private sealed class ParallelRangeJob : ParallelQueryJob
-        { internal World World = null!;
+        { internal World World = null!; internal EntityCommandBuffer? CommandBuffer;
             internal ParallelRangeAction<T1, T2, T3, T4, T5, T6, T7> Action = null!;
             private int[] _c1 = Array.Empty<int>();
             private int[] _c2 = Array.Empty<int>();
@@ -794,8 +794,8 @@ namespace LitheEcs
                     _c6[n] = archetype.GetColumnIndex(ComponentType<T6>.Id);
                     _c7[n] = archetype.GetColumnIndex(ComponentType<T7>.Id);
                 } }
-            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start;
-                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T4>(chunk, _c4[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T5>(chunk, _c5[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T6>(chunk, _c6[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T7>(chunk, _c7[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset)); } }
+            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start; EntityCommandBuffer.BeginParallelCallback(); var commandBuffer = CommandBuffer ?? World.ExistingCommandBuffer; var recordingTarget = commandBuffer; if (commandBuffer != null) { EntityCommandBuffer.EnterParallelRecording(commandBuffer); recordingTarget = commandBuffer.GetParallelRecordingTarget(); } try {
+                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T4>(chunk, _c4[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T5>(chunk, _c5[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T6>(chunk, _c6[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T7>(chunk, _c7[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset, recordingTarget)); } finally { EntityCommandBuffer.EndParallelCallback(); } } }
         public ref struct Enumerator
         { private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
           private T1[]? _d1;
@@ -938,11 +938,11 @@ namespace LitheEcs
         internal void ParallelForRanges(ParallelRangeAction<T1, T2, T3, T4, T5, T6, T7, T8> action, int minimumEntityCount, int batchSize)
         { if (action == null) throw new ArgumentNullException(nameof(action)); _world.FlushStructuralBatch(); _world.ThrowIfDisposed(); _plan.Ensure(); var matches = _plan.Matches; var entityCount = 0; for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount; _world.EnterParallelQuery(); try {
             if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1) { var queryOffset = 0; for (var a = 0; a < matches.Count; a++) { var archetype = matches[a]; for (var c = 0; c < archetype.Chunks.Count; c++) { var chunk = archetype.Chunks[c]; var count = chunk.Count; if (count == 0) continue;
-                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), archetype.GetColumn<T4>(chunk).AsSpan(0, count), archetype.GetColumn<T5>(chunk).AsSpan(0, count), archetype.GetColumn<T6>(chunk).AsSpan(0, count), archetype.GetColumn<T7>(chunk).AsSpan(0, count), archetype.GetColumn<T8>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset)); queryOffset += count; } } return; }
-            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
-        } catch (AggregateException) { throw; } catch (Exception exception) { throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
+                action(archetype.GetColumn<T1>(chunk).AsSpan(0, count), archetype.GetColumn<T2>(chunk).AsSpan(0, count), archetype.GetColumn<T3>(chunk).AsSpan(0, count), archetype.GetColumn<T4>(chunk).AsSpan(0, count), archetype.GetColumn<T5>(chunk).AsSpan(0, count), archetype.GetColumn<T6>(chunk).AsSpan(0, count), archetype.GetColumn<T7>(chunk).AsSpan(0, count), archetype.GetColumn<T8>(chunk).AsSpan(0, count), new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset, _world.ExistingCommandBuffer)); queryOffset += count; } } return; }
+            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.CommandBuffer = _world.ExistingCommandBuffer; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);
+        } catch (AggregateException) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw; } catch (Exception exception) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }
         private sealed class ParallelRangeJob : ParallelQueryJob
-        { internal World World = null!;
+        { internal World World = null!; internal EntityCommandBuffer? CommandBuffer;
             internal ParallelRangeAction<T1, T2, T3, T4, T5, T6, T7, T8> Action = null!;
             private int[] _c1 = Array.Empty<int>();
             private int[] _c2 = Array.Empty<int>();
@@ -974,8 +974,8 @@ namespace LitheEcs
                     _c7[n] = archetype.GetColumnIndex(ComponentType<T7>.Id);
                     _c8[n] = archetype.GetColumnIndex(ComponentType<T8>.Id);
                 } }
-            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start;
-                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T4>(chunk, _c4[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T5>(chunk, _c5[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T6>(chunk, _c6[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T7>(chunk, _c7[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T8>(chunk, _c8[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset)); } }
+            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start; EntityCommandBuffer.BeginParallelCallback(); var commandBuffer = CommandBuffer ?? World.ExistingCommandBuffer; var recordingTarget = commandBuffer; if (commandBuffer != null) { EntityCommandBuffer.EnterParallelRecording(commandBuffer); recordingTarget = commandBuffer.GetParallelRecordingTarget(); } try {
+                Action(archetype.GetColumn<T1>(chunk, _c1[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T2>(chunk, _c2[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T3>(chunk, _c3[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T4>(chunk, _c4[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T5>(chunk, _c5[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T6>(chunk, _c6[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T7>(chunk, _c7[item.MatchIndex]).AsSpan(item.Start, length), archetype.GetColumn<T8>(chunk, _c8[item.MatchIndex]).AsSpan(item.Start, length), new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset, recordingTarget)); } finally { EntityCommandBuffer.EndParallelCallback(); } } }
         public ref struct Enumerator
         { private readonly World _world; private readonly int _version; private readonly ArchetypeQueryPlan _plan; private int _a, _c, _row, _count;
           private T1[]? _d1;

@@ -204,12 +204,12 @@ public sealed class QueryGenerator : ISourceGenerator
         source.Append("                action(");
         for (var i = 1; i <= arity; i++)
             source.Append(i == 1 ? "" : ", ").Append("archetype.GetColumn<T").Append(i).Append(">(chunk).AsSpan(0, count)");
-        source.AppendLine(", new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset)); queryOffset += count; } } return; }");
-        source.AppendLine("            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);");
-        source.AppendLine("        } catch (AggregateException) { throw; } catch (Exception exception) { throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }");
+        source.AppendLine(", new EntityRange(_world, chunk.EntityIds, 0, count, queryOffset, _world.ExistingCommandBuffer)); queryOffset += count; } } return; }");
+        source.AppendLine("            var job = _plan.ParallelRangeJob as ParallelRangeJob; if (job == null) _plan.ParallelRangeJob = job = new ParallelRangeJob(); job.World = _world; job.CommandBuffer = _world.ExistingCommandBuffer; job.Action = action; job.Prepare(matches, batchSize); _world.ExecuteParallelQuery(job);");
+        source.AppendLine("        } catch (AggregateException) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw; } catch (Exception exception) { _world.ExistingCommandBuffer?.DiscardParallelLanes(); throw new AggregateException(exception); } finally { _world.ExitParallelQuery(); } }");
 
         source.AppendLine("        private sealed class ParallelRangeJob : ParallelQueryJob");
-        source.AppendLine("        { internal World World = null!;");
+        source.AppendLine("        { internal World World = null!; internal EntityCommandBuffer? CommandBuffer;");
         source.Append("            internal ParallelRangeAction<").Append(types).AppendLine("> Action = null!;");
         for (var i = 1; i <= arity; i++) source.Append("            private int[] _c").Append(i).AppendLine(" = Array.Empty<int>();");
         source.AppendLine("            protected override void EnsureDerivedMatchCapacity(int capacity) {");
@@ -222,11 +222,11 @@ public sealed class QueryGenerator : ISourceGenerator
         for (var i = 1; i <= arity; i++)
             source.Append("                    _c").Append(i).Append("[n] = archetype.GetColumnIndex(ComponentType<T").Append(i).AppendLine(">.Id);");
         source.AppendLine("                } }");
-        source.AppendLine("            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start;");
+        source.AppendLine("            protected override void Execute(in ParallelQueryWorkItem item) { var archetype = item.Archetype; var chunk = item.Chunk; var length = item.End - item.Start; EntityCommandBuffer.BeginParallelCallback(); var commandBuffer = CommandBuffer ?? World.ExistingCommandBuffer; var recordingTarget = commandBuffer; if (commandBuffer != null) { EntityCommandBuffer.EnterParallelRecording(commandBuffer); recordingTarget = commandBuffer.GetParallelRecordingTarget(); } try {");
         source.Append("                Action(");
         for (var i = 1; i <= arity; i++)
             source.Append(i == 1 ? "" : ", ").Append("archetype.GetColumn<T").Append(i).Append(">(chunk, _c").Append(i).Append("[item.MatchIndex]).AsSpan(item.Start, length)");
-        source.AppendLine(", new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset)); } }");
+        source.AppendLine(", new EntityRange(World, chunk.EntityIds, item.Start, length, item.QueryOffset, recordingTarget)); } finally { EntityCommandBuffer.EndParallelCallback(); } } }");
     }
 
     private static void AppendArchetypeEnumerator(StringBuilder source, int arity)

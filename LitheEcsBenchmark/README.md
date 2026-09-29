@@ -85,6 +85,21 @@ default worker count without adding worker configuration to the public API.
 dotnet run -c Release --project LitheEcsBenchmark -- --filter *ParallelQueryWorkerCountBenchmark*
 ```
 
+### Parallel command buffer
+
+`ParallelCommandBufferBenchmark` measures structural command recording from parallel ranges,
+including Playback and managed allocations. `ParallelDeferredCommandBenchmark` separates
+DeferredEntity Spawn, Component addition, and Relation addition. It creates a fresh World per
+iteration so cleanup is excluded from the measured operation. It also compares DeferredEntity
+relation commands with relation commands targeting existing Entities.
+`SerialCommandBufferBenchmark` is the single-threaded ECB baseline for separating parallel
+range scheduling overhead from command recording and structural Playback cost.
+
+```powershell
+dotnet build LitheEcsBenchmark/LitheEcsBenchmark.csproj -c Release --no-restore
+dotnet run -c Release --project LitheEcsBenchmark -- --filter *ParallelCommandBufferBenchmark*
+```
+
 `ParallelQueryActiveWorkerTuningBenchmark` sweeps 4,096 through 100,000 entities and the target
 entity count per active thread used by the adaptive scheduler.
 
