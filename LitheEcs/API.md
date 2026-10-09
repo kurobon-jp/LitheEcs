@@ -287,6 +287,8 @@ not stable between executions.
 - Worker exceptions are returned in an `AggregateException`.
 - `EntityRange.CommandBuffer` can record structural changes from parallel workers. Recording is thread-safe, but `Playback()` must be called from the World owner thread after `Run()` returns.
 - A `DeferredEntity` returned by `EntityRange.CommandBuffer.Spawn()` can be used with that same range command buffer, including component and relation commands.
+- Successful Runs are applied in Run order, preserving preceding and following ordinary ECB recordings. A failed Run discards only its own commands, including in sequential fallback.
+- Use the range command buffer only within its callback. Call `world.CommandBuffer.Playback()` after `Run()` returns.
 - Command order between parallel workers is not guaranteed. Do not record conflicting commands for the same Entity from multiple ranges.
 - With validation enabled, conflicting structural commands targeting the same Entity from multiple ranges throw during `Playback()`.
 - Users must synchronize captured shared state.

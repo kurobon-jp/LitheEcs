@@ -3429,6 +3429,177 @@ namespace LitheEcs.Tests
             Assert.That(_world.GetEntitiesWithTarget<FriendsWith>(target).Length, Is.EqualTo(12288));
         }
 
+        [TestCase(1, false)]
+        [TestCase(int.MaxValue, false)]
+        [TestCase(1, true)]
+        [TestCase(int.MaxValue, true)]
+        public void ParallelCommands_ShouldPreserveSuccessfulRunsAfterFailure(int minimumCount, bool lazyBuffer)
+        {
+            var entity = _world.Spawn();
+            entity.Add(new Position());
+            if (!lazyBuffer) _ = _world.CommandBuffer;
+            var query = _world.Query<Position>().AsParallelQuery(minimumCount, 1);
+            query.Run((_, range) => range.CommandBuffer.AddComponent(range[0], new Health(7)));
+            Assert.Throws<AggregateException>(() => query.Run((_, range) =>
+            {
+                range.CommandBuffer.RemoveComponent<Health>(range[0]);
+                range.CommandBuffer.Spawn(new Health(99), new Velocity());
+                throw new InvalidOperationException();
+            }));
+            _world.CommandBuffer.Playback();
+            Assert.That(entity.Get<Health>().Value, Is.EqualTo(7));
+            var count = 0;
+            _world.Query<Health>().ForEach((in Entity _, ref Health _) => count++);
+            Assert.That(count, Is.EqualTo(1));
+        }
+
+        [TestCase(1)]
+        [TestCase(int.MaxValue)]
+        public void ParallelCommands_ShouldPreserveMainAndRunOrder(int minimumCount)
+        {
+            var entity = _world.Spawn();
+            entity.Add(new Position());
+            var ecb = _world.CommandBuffer;
+            var query = _world.Query<Position>().AsParallelQuery(minimumCount, 1);
+            ecb.AddComponent(entity, new Health(1));
+            query.Run((_, range) => range.CommandBuffer.RemoveComponent<Health>(range[0]));
+            ecb.AddComponent(entity, new Health(2));
+            query.Run((_, range) => range.CommandBuffer.AddComponent(range[0], new Health(3)));
+            ecb.RemoveComponent<Health>(entity);
+            ecb.Playback();
+            Assert.That(entity.Has<Health>(), Is.False);
+            query.Run((_, range) => range.CommandBuffer.AddComponent(range[0], new Health(4)));
+            query.Run((_, range) => range.CommandBuffer.RemoveComponent<Health>(range[0]));
+            ecb.Playback();
+            Assert.That(entity.Has<Health>(), Is.False);
+        }
+
+        [Test]
+        public void ParallelCommands_ShouldPreventStructuralBatchWithPendingLaneCommands()
+        {
+            var entity = _world.Spawn();
+            entity.Add(new Position());
+            _world.Query<Position>().AsParallelQuery(1, 1).Run((_, range) =>
+                range.CommandBuffer.AddComponent(range[0], new Health(1)));
+            Assert.Throws<InvalidOperationException>(() => _world.BeginStructuralBatch());
+            _world.CommandBuffer.Playback();
+            using (_world.BeginStructuralBatch()) { }
+        }
+
+        [Test]
+        public void EntityCommandBuffer_ShouldRecordConcurrentlyOnOwnerAndOtherThread()
+        {
+            var ecb = _world.CommandBuffer;
+            using var barrier = new System.Threading.Barrier(2);
+            void Record()
+            {
+                barrier.SignalAndWait();
+                for (var i = 0; i < 4000; i++)
+                {
+                    var deferred = ecb.Spawn();
+                    ecb.AddComponent(deferred, new Health(i), new Velocity());
+                }
+            }
+            var worker = System.Threading.Tasks.Task.Run(Record);
+            Record();
+            worker.GetAwaiter().GetResult();
+            ecb.Playback();
+            var count = 0;
+            _world.Query<Health, Velocity>().ForEach((in Entity _, ref Health _, ref Velocity _) => count++);
+            Assert.That(count, Is.EqualTo(8000));
+        }
+
+        [TestCase(2, 1)]
+        [TestCase(2, int.MaxValue)]
+        [TestCase(8, 1)]
+        [TestCase(8, int.MaxValue)]
+        public void GeneratedParallelCommands_ShouldKeepPriorRunOnFailure(int arity, int minimumCount)
+        {
+            _world.CreateTemplate().Add(new Position()).Add(new Velocity()).Add(new Acceleration())
+                .Add(new Health()).Add(new Player()).Add(new Disabled()).Add(new Grounded()).Add(new Flying())
+                .SpawnBatch(128);
+            void Record(EntityRange range, bool fail)
+            {
+                for (var i = 0; i < range.Length; i++)
+                {
+                    if (fail) range.CommandBuffer.RemoveComponent<FilterRequired>(range[i]);
+                    else range.CommandBuffer.AddComponent(range[i], new FilterRequired());
+                }
+                if (fail) throw new InvalidOperationException();
+            }
+            if (arity == 2)
+            {
+                var query = _world.Query<Position, Velocity>().AsParallelQuery(minimumCount, 8);
+                query.Run((_, _, range) => Record(range, false));
+                Assert.Throws<AggregateException>(() => query.Run((_, _, range) => Record(range, true)));
+            }
+            else
+            {
+                var query = _world.Query<Position, Velocity, Acceleration, Health, Player, Disabled, Grounded, Flying>()
+                    .AsParallelQuery(minimumCount, 8);
+                query.Run((_, _, _, _, _, _, _, _, range) => Record(range, false));
+                Assert.Throws<AggregateException>(() => query.Run((_, _, _, _, _, _, _, _, range) => Record(range, true)));
+            }
+            _world.CommandBuffer.Playback();
+            var count = 0;
+            _world.Query<FilterRequired>().ForEach((in Entity _, ref FilterRequired _) => count++);
+            Assert.That(count, Is.EqualTo(128));
+        }
+
+        [TestCase(1, false)]
+        [TestCase(int.MaxValue, false)]
+        [TestCase(1, true)]
+        [TestCase(int.MaxValue, true)]
+        public void ParallelCommands_ShouldDiscardFirstFailedRun(int minimumCount, bool lazyBuffer)
+        {
+            var entity = _world.Spawn();
+            entity.Add(new Position());
+            var ecb = lazyBuffer ? null : _world.CommandBuffer;
+            Assert.Throws<AggregateException>(() => _world.Query<Position>().AsParallelQuery(minimumCount, 1)
+                .Run((_, range) =>
+                {
+                    var target = ecb ?? range.CommandBuffer;
+                    target.AddComponent(range[0], new Health(1));
+                    target.Spawn(new Health(2), new Velocity());
+                    throw new InvalidOperationException();
+                }));
+            _world.CommandBuffer.Playback();
+            Assert.That(entity.Has<Health>(), Is.False);
+            var count = 0;
+            _world.Query<Health>().ForEach((in Entity _, ref Health _) => count++);
+            Assert.That(count, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ParallelCommands_ShouldKeepDeferredEntitiesFromMultipleSuccessfulRuns()
+        {
+            var entity = _world.Spawn();
+            entity.Add(new Position());
+            var query = _world.Query<Position>().AsParallelQuery(1, 1);
+            query.Run((_, range) => range.CommandBuffer.Spawn(new Health(3), new Velocity()));
+            query.Run((_, range) => range.CommandBuffer.Spawn(new Health(5), new Velocity()));
+            _world.CommandBuffer.Playback();
+            var values = new System.Collections.Generic.List<int>();
+            _world.Query<Health>().ForEach((in Entity _, ref Health health) => values.Add(health.Value));
+            Assert.That(values, Is.EquivalentTo(new[] { 3, 5 }));
+        }
+
+        [TestCase(1)]
+        [TestCase(int.MaxValue)]
+        public void ParallelCommands_ShouldRejectPlaybackInsideCallback(int minimumCount)
+        {
+            var entity = _world.Spawn();
+            entity.Add(new Position());
+            var ecb = _world.CommandBuffer;
+            _world.Query<Position>().AsParallelQuery(minimumCount, 1).Run((_, range) =>
+            {
+                range.CommandBuffer.AddComponent(range[0], new Health(1));
+                Assert.Throws<InvalidOperationException>(() => ecb.Playback());
+            });
+            ecb.Playback();
+            Assert.That(entity.Get<Health>().Value, Is.EqualTo(1));
+        }
+
         [Test]
         public void ParallelForRanges_ShouldDiscardLaneCommandsAfterCallbackFailure()
         {

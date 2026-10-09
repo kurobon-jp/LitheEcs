@@ -381,6 +381,8 @@ world.Query<Position>().AsParallelQuery().Run((positions, entities) =>
 - 同じWorldでは、複数の`ParallelQuery.Run`を同時に実行したり、処理をネストしたりできません。
 - 実行中にSpawn、Despawn、Componentの追加・削除を行うと`InvalidOperationException`が発生します。並列処理内で発生した例外は`AggregateException`にまとめられます。
 - `EntityRange.CommandBuffer`から構造変更を記録できます。`EntityCommandBuffer`への記録は複数threadから安全に行えますが、`Playback()`はWorldを所有するthreadから、`ParallelQuery.Run`完了後に呼び出してください。
+- 成功したRunのコマンドはRun順に適用され、Runの前後に通常のECBへ記録したコマンドとの順序も保持されます。失敗したRunは、そのRunのコマンドだけを破棄します。逐次fallbackでも同じ動作です。
+- Rangeのcommand bufferはcallback内で使用し、Run完了後に`world.CommandBuffer.Playback()`を呼び出してください。
 - `EntityRange.CommandBuffer.Spawn()`が返す`DeferredEntity`は、同じRangeのcommand bufferでComponent追加やRelation追加に使用できます。
 - Parallel worker間のcommand記録順は保証されません。同じEntityへ複数Rangeから競合するcommandを記録しないでください。
 - validation有効時は、複数Rangeから同じEntityへ構造変更commandを記録すると`Playback()`で例外になります。

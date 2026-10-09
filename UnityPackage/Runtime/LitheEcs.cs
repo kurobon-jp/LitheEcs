@@ -1682,7 +1682,39 @@ namespace LitheEcs
         private readonly int _ownerThreadId;
         private readonly bool _isParallelLane;
         private readonly object _sync = new();
-        private readonly List<EntityCommandBuffer> _parallelLanes = new();
+        private List<EntityCommandBuffer> _parallelLanes = new();
+        private readonly List<(int MainBoundary, List<EntityCommandBuffer> Lanes)> _parallelRuns = new();
+        private readonly Stack<List<EntityCommandBuffer>> _parallelLanePool = new();
+        private bool _parallelRunActive;
+        private int _parallelRunBoundary;
+
+        internal void BeginParallelRun()
+        {
+            lock (_sync)
+            {
+                if (_parallelRunActive) return;
+                _parallelRunActive = true;
+                // Main-buffer commands before this boundary precede the entire Run.
+                _parallelRunBoundary = _commands.Count;
+            }
+        }
+
+        internal void CompleteParallelRun()
+        {
+            lock (_sync)
+            {
+                if (!_parallelRunActive) return;
+                _parallelRunActive = false;
+                var hasCommands = false;
+                foreach (var lane in _parallelLanes)
+                    if (lane._commands.Count != 0) { hasCommands = true; break; }
+                if (!hasCommands) return;
+                // Keep payloads and DeferredEntity ownership isolated until Playback.
+                _parallelRuns.Add((_parallelRunBoundary, _parallelLanes));
+                _parallelLanes = _parallelLanePool.Count != 0
+                    ? _parallelLanePool.Pop() : new List<EntityCommandBuffer>();
+            }
+        }
 
         internal EntityCommandBuffer(World world)
             : this(world, world.OwnerThreadId, false)
@@ -1800,7 +1832,14 @@ namespace LitheEcs
             }
         }
 
-        internal void DiscardParallelLanes() => ClearParallelLanes();
+        internal void DiscardParallelLanes()
+        {
+            lock (_sync)
+            {
+                ClearParallelLanes();
+                _parallelRunActive = false;
+            }
+        }
 
         private enum CommandKind : byte
         {
@@ -1942,7 +1981,19 @@ namespace LitheEcs
 
         internal bool HasPendingCommands
         {
-            get { lock (_sync) return _commands.Count != 0; }
+            get
+            {
+                lock (_sync)
+                {
+                    if (_commands.Count != 0) return true;
+                    for (var r = 0; r < _parallelRuns.Count; r++)
+                        foreach (var lane in _parallelRuns[r].Lanes)
+                            if (lane._commands.Count != 0) return true;
+                    foreach (var lane in _parallelLanes)
+                        if (lane._commands.Count != 0) return true;
+                    return false;
+                }
+            }
         }
 
         internal void EnsureComponentCapacity<T>(int capacity) where T : struct
@@ -2137,11 +2188,13 @@ namespace LitheEcs
                 RecordEntityComponent(entity, component3);
                 return;
             }
-            ValidateThread();
-            ValidateWorld(entity);
-            RecordEntityComponent(entity, component1);
-            RecordEntityComponent(entity, component2);
-            RecordEntityComponent(entity, component3);
+            lock (_sync)
+            {
+                ValidateWorld(entity);
+                RecordEntityComponent(entity, component1);
+                RecordEntityComponent(entity, component2);
+                RecordEntityComponent(entity, component3);
+            }
         }
 
         public void AddComponent<T1, T2, T3, T4>(Entity entity, T1 component1, T2 component2, T3 component3, T4 component4)
@@ -2161,12 +2214,14 @@ namespace LitheEcs
                 RecordEntityComponent(entity, component4);
                 return;
             }
-            ValidateThread();
-            ValidateWorld(entity);
-            RecordEntityComponent(entity, component1);
-            RecordEntityComponent(entity, component2);
-            RecordEntityComponent(entity, component3);
-            RecordEntityComponent(entity, component4);
+            lock (_sync)
+            {
+                ValidateWorld(entity);
+                RecordEntityComponent(entity, component1);
+                RecordEntityComponent(entity, component2);
+                RecordEntityComponent(entity, component3);
+                RecordEntityComponent(entity, component4);
+            }
         }
 
         public void AddComponent<T>(DeferredEntity entity, T component = default) where T : struct
@@ -2204,10 +2259,12 @@ namespace LitheEcs
                 RecordDeferredComponent(entity.Id, component2);
                 return;
             }
-            ValidateThread();
-            ValidateDeferred(entity);
-            RecordDeferredComponent(entity.Id, component1);
-            RecordDeferredComponent(entity.Id, component2);
+            lock (_sync)
+            {
+                ValidateDeferred(entity);
+                RecordDeferredComponent(entity.Id, component1);
+                RecordDeferredComponent(entity.Id, component2);
+            }
         }
 
         public void AddComponent<T1, T2, T3>(DeferredEntity entity, T1 component1, T2 component2, T3 component3)
@@ -2226,11 +2283,13 @@ namespace LitheEcs
                 RecordDeferredComponent(entity.Id, component3);
                 return;
             }
-            ValidateThread();
-            ValidateDeferred(entity);
-            RecordDeferredComponent(entity.Id, component1);
-            RecordDeferredComponent(entity.Id, component2);
-            RecordDeferredComponent(entity.Id, component3);
+            lock (_sync)
+            {
+                ValidateDeferred(entity);
+                RecordDeferredComponent(entity.Id, component1);
+                RecordDeferredComponent(entity.Id, component2);
+                RecordDeferredComponent(entity.Id, component3);
+            }
         }
 
         public void AddComponent<T1, T2, T3, T4>(DeferredEntity entity, T1 component1, T2 component2, T3 component3, T4 component4)
@@ -2250,12 +2309,14 @@ namespace LitheEcs
                 RecordDeferredComponent(entity.Id, component4);
                 return;
             }
-            ValidateThread();
-            ValidateDeferred(entity);
-            RecordDeferredComponent(entity.Id, component1);
-            RecordDeferredComponent(entity.Id, component2);
-            RecordDeferredComponent(entity.Id, component3);
-            RecordDeferredComponent(entity.Id, component4);
+            lock (_sync)
+            {
+                ValidateDeferred(entity);
+                RecordDeferredComponent(entity.Id, component1);
+                RecordDeferredComponent(entity.Id, component2);
+                RecordDeferredComponent(entity.Id, component3);
+                RecordDeferredComponent(entity.Id, component4);
+            }
         }
 
         public void AddComponentBatch<T>(ReadOnlySpan<Entity> entities, T component) where T : struct
@@ -2266,11 +2327,6 @@ namespace LitheEcs
                 return;
             }
             if (_isParallelLane)
-            {
-                RecordComponentBatch(entities, component);
-                return;
-            }
-            if (IsOwnerThread)
             {
                 RecordComponentBatch(entities, component);
                 return;
@@ -2316,18 +2372,6 @@ namespace LitheEcs
                 return;
             }
             if (_isParallelLane)
-            {
-                ValidateWorld(entity);
-                var buffer = GetOrCreateComponentBuffer<T>();
-                RecordCommand(new Command
-                {
-                    Kind = CommandKind.KeyRemove,
-                    Target = entity,
-                    ComponentBuffer = buffer,
-                });
-                return;
-            }
-            if (IsOwnerThread)
             {
                 ValidateWorld(entity);
                 var buffer = GetOrCreateComponentBuffer<T>();
@@ -2410,18 +2454,20 @@ namespace LitheEcs
                 });
                 return;
             }
-            ValidateThread();
-            ValidateDeferred(source);
-            ValidateWorld(target);
-            var buffer = GetOrCreateComponentBuffer<TRelation>();
-            RecordCommand(new Command
+            lock (_sync)
             {
-                Kind = CommandKind.KeyAddRelation,
-                DeferredEntityId = source.Id,
-                TargetIsDeferred = true,
-                ComponentBuffer = buffer,
-                RelationTarget = target,
-            });
+                ValidateDeferred(source);
+                ValidateWorld(target);
+                var buffer = GetOrCreateComponentBuffer<TRelation>();
+                RecordCommand(new Command
+                {
+                    Kind = CommandKind.KeyAddRelation,
+                    DeferredEntityId = source.Id,
+                    TargetIsDeferred = true,
+                    ComponentBuffer = buffer,
+                    RelationTarget = target,
+                });
+            }
         }
 
         public void RemoveRelation<TRelation>(Entity source, Entity target) where TRelation : struct
@@ -2497,17 +2543,22 @@ namespace LitheEcs
             ValidatePlaybackThread();
             lock (_sync)
             {
+                if (_isParallelLane || _parallelRunActive)
+                    throw new InvalidOperationException("Call World.CommandBuffer.Playback after ParallelQuery.Run returns.");
                 try
                 {
 #if !RELEASE && !DISABLE_LITHEECS_VALIDATION
                 ValidateParallelCommandConflicts();
 #endif
-                    PlaybackCommands(_commands, _batchEntities, _resolvedEntities);
-                    for (var i = 0; i < _parallelLanes.Count; i++)
+                    var mainStart = 0;
+                    foreach (var run in _parallelRuns)
                     {
-                        var lane = _parallelLanes[i];
-                        PlaybackCommands(lane._commands, lane._batchEntities, lane._resolvedEntities);
+                        PlaybackCommands(_commands, _batchEntities, _resolvedEntities, mainStart, run.MainBoundary);
+                        mainStart = run.MainBoundary;
+                        foreach (var lane in run.Lanes)
+                            PlaybackCommands(lane._commands, lane._batchEntities, lane._resolvedEntities, 0, lane._commands.Count);
                     }
+                    PlaybackCommands(_commands, _batchEntities, _resolvedEntities, mainStart, _commands.Count);
                 }
                 finally
                 {
@@ -2524,13 +2575,22 @@ namespace LitheEcs
                     _nextDeferredEntityId = 0;
                     _generation++;
                     ClearParallelLanes();
+                    var currentLanes = _parallelLanes;
+                    foreach (var run in _parallelRuns)
+                    {
+                        _parallelLanes = run.Lanes;
+                        ClearParallelLanes();
+                        _parallelLanePool.Push(run.Lanes);
+                    }
+                    _parallelLanes = currentLanes;
+                    _parallelRuns.Clear();
                 }
             }
         }
 
-        private void PlaybackCommands(List<Command> commands, List<Entity> batchEntities, Entity[] resolvedEntities)
+        private void PlaybackCommands(List<Command> commands, List<Entity> batchEntities, Entity[] resolvedEntities, int start, int end)
         {
-            for (var i = 0; i < commands.Count; i++)
+            for (var i = start; i < end; i++)
             {
                 var command = commands[i];
                 switch (command.Kind)
@@ -2546,19 +2606,19 @@ namespace LitheEcs
                             ? resolvedEntities[command.DeferredEntityId]
                             : command.Target;
                         var addEnd = i + 1;
-                        while (addEnd < commands.Count && IsSameAddTarget(command, commands[addEnd])) addEnd++;
+                        while (addEnd < end && IsSameAddTarget(command, commands[addEnd])) addEnd++;
                         ApplyAddRange(commands, addTarget, i, addEnd);
                         i = addEnd - 1;
                         break;
                     case CommandKind.KeyAddBatch:
                         var batchEnd = i + 1;
-                        while (batchEnd < commands.Count && IsSameBatch(command, commands[batchEnd], batchEntities)) batchEnd++;
+                        while (batchEnd < end && IsSameBatch(command, commands[batchEnd], batchEntities)) batchEnd++;
                         ApplyAddBatchRange(commands, batchEntities, i, batchEnd, command.BatchStart, command.BatchCount);
                         i = batchEnd - 1;
                         break;
                     case CommandKind.KeyRemove:
                         var removeEnd = i + 1;
-                        while (removeEnd < commands.Count && commands[removeEnd].Kind == CommandKind.KeyRemove
+                        while (removeEnd < end && commands[removeEnd].Kind == CommandKind.KeyRemove
                                && commands[removeEnd].Target == command.Target) removeEnd++;
                         ApplyRemoveRange(commands, command.Target, i, removeEnd);
                         i = removeEnd - 1;
@@ -2582,12 +2642,12 @@ namespace LitheEcs
 #if !RELEASE && !DISABLE_LITHEECS_VALIDATION
         private void ValidateParallelCommandConflicts()
         {
-            if (_parallelLanes.Count == 0) return;
-
-            var allTargets = new HashSet<Entity>();
-            ValidateCommandSourceConflicts(_commands, _batchEntities, allTargets);
-            for (var i = 0; i < _parallelLanes.Count; i++)
-                ValidateCommandSourceConflicts(_parallelLanes[i]._commands, _parallelLanes[i]._batchEntities, allTargets);
+            foreach (var run in _parallelRuns)
+            {
+                var allTargets = new HashSet<Entity>();
+                foreach (var lane in run.Lanes)
+                    ValidateCommandSourceConflicts(lane._commands, lane._batchEntities, allTargets);
+            }
         }
 
         private static void ValidateCommandSourceConflicts(
@@ -2691,12 +2751,6 @@ namespace LitheEcs
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void ValidateThread()
-        {
-            // Command recording is thread-safe. Playback remains owner-thread-only.
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void ValidatePlaybackThread()
         {
             if (Environment.CurrentManagedThreadId != _ownerThreadId)
@@ -2765,7 +2819,7 @@ namespace LitheEcs
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void RecordCommand(in Command command)
         {
-            if (_isParallelLane || IsOwnerThread)
+            if (_isParallelLane)
             {
 #if _INTERNAL_DERIVED_USE_DIAGNOSTICS
                 if (_allocationDiagnostics.Enabled && _commands.Count == _commands.Capacity)
@@ -2783,8 +2837,6 @@ namespace LitheEcs
                 _commands.Add(command);
             }
         }
-
-        private bool IsOwnerThread => Environment.CurrentManagedThreadId == _ownerThreadId;
 
         private void ValidateDeferred(in DeferredEntity entity)
         {
@@ -2805,7 +2857,7 @@ namespace LitheEcs
 
         private ComponentCommandBuffer<T> GetOrCreateComponentBuffer<T>() where T : struct
         {
-            if (_isParallelLane || IsOwnerThread) return GetOrCreateComponentBufferCore<T>();
+            if (_isParallelLane) return GetOrCreateComponentBufferCore<T>();
             lock (_sync)
             {
                 return GetOrCreateComponentBufferCore<T>();
@@ -3740,6 +3792,26 @@ namespace LitheEcs
                 throw new InvalidOperationException("A protected Query operation is already executing on this World.");
         }
 
+        private bool _parallelCommandRunActive;
+
+        internal void BeginParallelCommandRun()
+        {
+            _parallelCommandRunActive = true;
+            EntityCommandBuffer.BeginParallelCallback();
+            if (_commandBuffer != null)
+            {
+                _commandBuffer.BeginParallelRun();
+                EntityCommandBuffer.EnterParallelRecording(_commandBuffer);
+            }
+        }
+
+        internal void EndParallelCommandRun()
+        {
+            _commandBuffer?.CompleteParallelRun();
+            _parallelCommandRunActive = false;
+            EntityCommandBuffer.EndParallelCallback();
+        }
+
         internal void ExitParallelQuery() => Volatile.Write(ref _parallelQueryActive, 0);
 
         internal void ExecuteParallelQuery(ParallelQueryJob job)
@@ -3930,9 +4002,17 @@ namespace LitheEcs
             {
                 ThrowIfDisposed();
                 var commandBuffer = _commandBuffer;
-                if (commandBuffer != null) return commandBuffer;
-                lock (_commandBufferSync)
-                    return _commandBuffer ??= new EntityCommandBuffer(this);
+                if (commandBuffer == null)
+                {
+                    lock (_commandBufferSync)
+                        commandBuffer = _commandBuffer ??= new EntityCommandBuffer(this);
+                }
+                if (_parallelCommandRunActive && EntityCommandBuffer.IsParallelCallbackActive)
+                {
+                    commandBuffer.BeginParallelRun();
+                    EntityCommandBuffer.ActivateParallelRecording(commandBuffer);
+                }
+                return commandBuffer;
             }
         }
 
@@ -6707,6 +6787,7 @@ namespace LitheEcs
             var entityCount = 0;
             for (var i = 0; i < matches.Count; i++) entityCount += matches[i].EntityCount;
             _world.EnterParallelQuery();
+            _world.BeginParallelCommandRun();
             try
             {
                 if (entityCount < minimumEntityCount || Environment.ProcessorCount <= 1)
@@ -6746,7 +6827,7 @@ namespace LitheEcs
                 _world.ExistingCommandBuffer?.DiscardParallelLanes();
                 throw new AggregateException(exception);
             }
-            finally { _world.ExitParallelQuery(); }
+            finally { _world.EndParallelCommandRun(); _world.ExitParallelQuery(); }
         }
 
         private sealed class ParallelRangeJob : ParallelQueryJob
